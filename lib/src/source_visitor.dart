@@ -49,6 +49,11 @@ class SourceVisitor extends ThrowingAstVisitor {
   /// the original source text.
   bool _passedSelectionStart = false;
 
+  /// Whether a split should next the chunks that are encountered
+  bool _nestOnSplit = true;
+  void nestOnSplit() => _nestOnSplit = true;
+  void stopNestOnSplit() => _nestOnSplit = false;
+
   /// `true` if the visitor has written past the end of the selection in the
   /// original source text.
   bool _passedSelectionEnd = false;
@@ -3801,7 +3806,9 @@ class SourceVisitor extends ThrowingAstVisitor {
 
     if (caseClause == null) {
       // Simple if with no "case".
+      stopNestOnSplit();
       visit(condition);
+      nestOnSplit();
     } else {
       // If-case.
 
@@ -4192,7 +4199,7 @@ class SourceVisitor extends ThrowingAstVisitor {
   /// Writes a single space split owned by the current rule.
   ///
   /// Returns the chunk the split was applied to.
-  Chunk split() => builder.split(space: true);
+  Chunk split() => builder.split(nest: _nestOnSplit, space: true);
 
   /// Writes a zero-space split owned by the current rule.
   ///
