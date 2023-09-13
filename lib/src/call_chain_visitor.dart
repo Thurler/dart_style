@@ -227,7 +227,6 @@ class CallChainVisitor {
     // arguments inside them get indented to line up with the `.`.
     for (var call in _calls) {
       _enableRule();
-      _visitor.zeroSplit();
       call.write(this);
     }
 
