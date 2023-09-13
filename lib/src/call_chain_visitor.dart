@@ -222,7 +222,6 @@ class CallChainVisitor {
     //       body;
     //     });
     // TODO(rnystrom): Come up with a less arbitrary way to express this?
-    if (_calls.length > 1) _visitor.builder.startBlockArgumentNesting();
 
     // The chain of calls splits atomically (either all or none). Any block
     // arguments inside them get indented to line up with the `.`.
@@ -231,8 +230,6 @@ class CallChainVisitor {
       _visitor.zeroSplit();
       call.write(this);
     }
-
-    if (_calls.length > 1) _visitor.builder.endBlockArgumentNesting();
 
     // If there are block calls, end the chain and write those without any
     // extra indentation.
