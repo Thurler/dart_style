@@ -3783,10 +3783,21 @@ class SourceVisitor extends ThrowingAstVisitor {
   /// statement or element.
   void _visitIfCondition(Token ifKeyword, Token leftParenthesis,
       AstNode condition, CaseClause? caseClause, Token rightParenthesis) {
-    builder.nestExpression();
+    int expectedLength = (
+      builder.indentation * 2 + // Base if indentation
+      4 + // "if ("
+      condition.toString().length +
+      3 // ") {"
+    );
+    bool willOverflow = expectedLength > builder.pageWidth;
+
     token(ifKeyword);
     space();
     token(leftParenthesis);
+    if (willOverflow) {
+      newline();
+      builder.indent(2);
+    }
 
     if (caseClause == null) {
       // Simple if with no "case".
@@ -3828,8 +3839,11 @@ class SourceVisitor extends ThrowingAstVisitor {
       }
     }
 
+    if (willOverflow) {
+      newline();
+      builder.unindent();
+    }
     token(rightParenthesis);
-    builder.unnest();
   }
 
   void _visitWhenClause(WhenClause whenClause) {
