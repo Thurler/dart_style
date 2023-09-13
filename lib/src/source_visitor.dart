@@ -834,8 +834,6 @@ class SourceVisitor extends ThrowingAstVisitor {
       // ":".
       token(node.separator);
       space();
-
-      builder.indent(6);
     } else {
       // Shift the itself ":" forward.
       builder.indent(Indent.constructorInitializer);
@@ -878,8 +876,10 @@ class SourceVisitor extends ThrowingAstVisitor {
       node.initializers[i].accept(this);
     }
 
-    builder.unindent();
-    if (!hasTrailingComma) builder.unindent();
+    if (!hasTrailingComma) {
+      builder.unindent();
+      builder.unindent();
+    }
   }
 
   @override
