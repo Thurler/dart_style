@@ -710,14 +710,15 @@ class SourceVisitor extends ThrowingAstVisitor {
 
     builder.startSpan();
 
-    split();
+    builder.indent();
+    split(nest: false);
     token(node.question);
     space();
     builder.nestExpression();
     visit(node.thenExpression);
     builder.unnest();
 
-    split();
+    split(nest: false);
     token(node.colon);
     space();
     visit(node.elseExpression);
@@ -727,6 +728,7 @@ class SourceVisitor extends ThrowingAstVisitor {
     // parent rules to split too.
     if (node.parent is ConditionalExpression) builder.forceRules();
 
+    builder.unindent();
     builder.endRule();
     builder.endSpan();
     builder.endBlockArgumentNesting();
@@ -4199,7 +4201,10 @@ class SourceVisitor extends ThrowingAstVisitor {
   /// Writes a single space split owned by the current rule.
   ///
   /// Returns the chunk the split was applied to.
-  Chunk split() => builder.split(nest: _nestOnSplit, space: true);
+  Chunk split({bool? nest}) => builder.split(
+    nest: nest ?? _nestOnSplit,
+    space: true,
+  );
 
   /// Writes a zero-space split owned by the current rule.
   ///
