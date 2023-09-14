@@ -421,21 +421,7 @@ class SourceVisitor extends ThrowingAstVisitor {
     //       stuff
     //     ]
     //       ..add(more);
-    var target = node.target;
-    var splitIfTargetSplits = true;
-    if (node.cascadeSections.length > 1) {
-      // Always split if there are multiple cascade sections.
-    } else if (target.isCollectionLiteral) {
-      splitIfTargetSplits = false;
-    } else if (target is InvocationExpression) {
-      // If the target is a call with a trailing comma in the argument list,
-      // treat it like a collection literal.
-      splitIfTargetSplits = !target.argumentList.arguments.hasCommaAfter;
-    } else if (target is InstanceCreationExpression) {
-      // If the target is a call with a trailing comma in the argument list,
-      // treat it like a collection literal.
-      splitIfTargetSplits = !target.argumentList.arguments.hasCommaAfter;
-    }
+    var splitIfTargetSplits = node.cascadeSections.length > 1;
 
     if (splitIfTargetSplits) {
       builder.startLazyRule(node.allowInline ? Rule() : Rule.hard());
