@@ -776,76 +776,110 @@ class SourceVisitor extends ThrowingAstVisitor {
     visit(node.redirectedConstructor);
   }
 
+  int _initializerListLength(NodeList<ConstructorInitializer> list) {
+    return list.fold<int>(
+      list.length - 1, // spaces between initializers
+      (int acc, ConstructorInitializer initializer) =>
+          acc + initializer.toString().length + 1, // either "," or ";"
+    );
+  }
+
   void _visitConstructorInitializers(ConstructorDeclaration node) {
-    var hasTrailingComma = node.parameters.parameters.hasCommaAfter;
+    // Check if the parameter list will overflow
+    bool parameterOverflow = false;
+    // Check if the parameter list + separator will overflow
+    bool separatorOverflow = false;
+    // Check if the parameter list + separator + initializers will overflow
+    bool initializerOverflow = false;
 
-    if (hasTrailingComma) {
-      // Since the ")", "])", or "})" on the preceding line doesn't take up
-      // much space, it looks weird to move the ":" onto it's own line. Instead,
-      // keep it and the first initializer on the current line but add enough
-      // space before it to line it up with any subsequent initializers.
-      //
-      //     Foo(
-      //       parameter,
-      //     )   : field = value,
-      //           super();
-      space();
-      if (node.initializers.length > 1) {
-        var padding = '  ';
-        if (node.parameters.parameters.last.isNamed ||
-            node.parameters.parameters.last.isOptionalPositional) {
-          padding = ' ';
-        }
-        _writeText(padding, node.separator!);
+    int usedChars = 0;
+    // If there is a trailing comma, overflow will always occur
+    if (node.parameters.parameters.hasCommaAfter) {
+      parameterOverflow = true;
+    } else {
+      // Assume the constructor will always be at 1 indentation level
+      usedChars = 2;
+      usedChars += node.toString().indexOf(') :') + 1; // include ")"
+      if (!parameterOverflow) {
+        parameterOverflow = usedChars > builder.pageWidth;
       }
+      usedChars += 2; // include " :"
+      separatorOverflow = usedChars > builder.pageWidth;
+    }
 
-      // ":".
-      token(node.separator);
+    // In the unfortunate event that the parameter list doesn't overflow, but
+    // adding the space and separator causes an overflow, we try to accommodate
+    // by trying to keep the initializers and separator in one line. If this is
+    // still not possible, then we must keep the separator unindented, and only
+    // indent the initializers - except if there is only one initializer, then
+    // we indent everything to avoid ugly misalignments
+    //
+    // Otherwise, we simply take into account if the initializer list will fit
+    // in a single line, to know if we force a line break and indent or not
+    bool didIndent = false;
+    bool unindentedSeparator = false;
+    if (!parameterOverflow && separatorOverflow) {
+      bool indentSeparator = node.initializers.length == 1;
+      if (node.initializers.length > 1) {
+        usedChars = 6; // "    : "
+        usedChars += _initializerListLength(node.initializers);
+        initializerOverflow = usedChars > builder.pageWidth;
+        indentSeparator = !initializerOverflow;
+      }
+      unindentedSeparator = !indentSeparator;
+      newline();
+      if (indentSeparator) {
+        builder.indent();
+        didIndent = true;
+      }
+      token(node.separator); // ":"
       space();
     } else {
-      // Shift the itself ":" forward.
-      builder.indent(Indent.constructorInitializer);
-
-      // If the parameters or initializers split, put the ":" on its own line.
-      split();
-
-      // ":".
-      token(node.separator);
+      // If the parameter list will overflow, the ) will aways be in its own
+      // line, so we can reset the usedChars to check for initializer overflow
+      if (parameterOverflow) {
+        bool hasNamedParameters = node.parameters.parameters.any(
+          (FormalParameter p) => p.isNamed,
+        );
+        usedChars = hasNamedParameters ? 6 : 5; // "  }) :" vs "  ) :"
+      }
+      usedChars += 1; // trailing space after separator
+      usedChars += _initializerListLength(node.initializers);
+      initializerOverflow = usedChars > builder.pageWidth;
       space();
-
-      // Try to line up the initializers with the first one that follows the ":":
-      //
-      //     Foo(notTrailing)
-      //         : initializer = value,
-      //           super(); // +2 from previous line.
-      //
-      //     Foo(
-      //       trailing,
-      //     ) : initializer = value,
-      //         super(); // +4 from previous line.
-      //
-      // This doesn't work if there is a trailing comma in an optional parameter,
-      // but we don't want to do a weird +5 alignment:
-      //
-      //     Foo({
-      //       trailing,
-      //     }) : initializer = value,
-      //         super(); // Doesn't quite line up. :(
-      builder.indent(2);
+      token(node.separator); // ":"
+      // Only break if the initializers overflow
+      // If there is only one initializer, break only if parameters don't
+      // overflow, since otherwise we'd have a line with nothing but a ":"
+      if (
+        initializerOverflow &&
+        (node.initializers.length > 1 || !parameterOverflow)
+      ) {
+        newline();
+        builder.indent();
+        didIndent = true;
+      } else {
+        space();
+      }
     }
 
     for (var i = 0; i < node.initializers.length; i++) {
       if (i > 0) {
         // Preceding comma.
         token(node.initializers[i].beginToken.previous);
-        newline();
+        soloSplit();
+        if (initializerOverflow) {
+          newline();
+        }
       }
 
       node.initializers[i].accept(this);
+      if (i == 0 && unindentedSeparator) {
+        builder.indent();
+        didIndent = true;
+      }
     }
-
-    if (!hasTrailingComma) {
-      builder.unindent();
+    if (didIndent) {
       builder.unindent();
     }
   }
