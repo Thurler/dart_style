@@ -413,38 +413,20 @@ class SourceVisitor extends ThrowingAstVisitor {
       return;
     }
 
-    // Whether a split in the cascade target expression forces the cascade to
-    // move to the next line. It looks weird to move the cascade down if the
-    // target expression is a collection, so we don't:
-    //
-    //     var list = [
-    //       stuff
-    //     ]
-    //       ..add(more);
-    var splitIfTargetSplits = node.cascadeSections.length > 1;
-
-    if (splitIfTargetSplits) {
-      builder.startLazyRule(node.allowInline ? Rule() : Rule.hard());
-    }
-
     visit(node.target);
 
-    builder.nestExpression(indent: Indent.cascade, now: true);
+    builder.nestExpression(indent: 0, now: true);
     builder.startBlockArgumentNesting();
 
     // If the cascade section shouldn't cause the cascade to split, end the
     // rule early so it isn't affected by it.
-    if (!splitIfTargetSplits) {
-      builder.startRule(node.allowInline ? Rule() : Rule.hard());
-    }
+    builder.startRule(node.allowInline ? Rule() : Rule.hard());
 
     zeroSplit();
 
-    if (!splitIfTargetSplits) builder.endRule();
+    builder.endRule();
 
     visitNodes(node.cascadeSections, between: zeroSplit);
-
-    if (splitIfTargetSplits) builder.endRule();
 
     builder.endBlockArgumentNesting();
     builder.unnest();
