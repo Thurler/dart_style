@@ -2889,10 +2889,8 @@ class SourceVisitor extends ThrowingAstVisitor {
       token(member.colon);
 
       if (member.statements.isNotEmpty) {
-        builder.indent();
-        newline();
+        space();
         visitNodes(member.statements, between: oneOrTwoNewlines);
-        builder.unindent();
         oneOrTwoNewlines();
       } else {
         // Don't preserve blank lines between empty cases.
