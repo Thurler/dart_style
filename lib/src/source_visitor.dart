@@ -3227,7 +3227,6 @@ class SourceVisitor extends ThrowingAstVisitor {
 
     // Blocks as operands to infix operators should always nest like regular
     // operands. (Granted, this case is exceedingly rare in real code.)
-    builder.startBlockArgumentNesting();
 
     void traverse(AstNode e) {
       if (e is! T) {
@@ -3255,8 +3254,6 @@ class SourceVisitor extends ThrowingAstVisitor {
     }
 
     traverse(node);
-
-    builder.endBlockArgumentNesting();
 
     if (nest) builder.unnest();
     builder.endSpan();
