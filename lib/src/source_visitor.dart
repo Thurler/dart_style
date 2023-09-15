@@ -3868,24 +3868,7 @@ class SourceVisitor extends ThrowingAstVisitor {
   void _separatorBetweenTypeAndVariable(TypeAnnotation? type,
       {bool isSolo = false}) {
     if (type == null) return;
-
-    var isBlockType = false;
-    if (type is GenericFunctionType) {
-      // Function types get block-like formatting if they have a trailing comma.
-      isBlockType = type.parameters.parameters.isNotEmpty &&
-          type.parameters.parameters.last.hasCommaAfter;
-    } else if (type is RecordTypeAnnotation) {
-      // Record types always have block-like formatting.
-      isBlockType = true;
-    }
-
-    if (isBlockType) {
-      space();
-    } else if (isSolo) {
-      soloSplit();
-    } else {
-      split();
-    }
+    space();
   }
 
   /// Whether [node] should be forced to split even if completely empty.
