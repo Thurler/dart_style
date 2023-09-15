@@ -3244,7 +3244,11 @@ class SourceVisitor extends ThrowingAstVisitor {
           space();
           token(binary.operator);
 
-          split();
+          if (binary.operator.toString() == '??') {
+            soloSplit();
+          } else {
+            split();
+          }
           traverse(binary.right);
         }
       }
