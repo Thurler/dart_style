@@ -3243,10 +3243,10 @@ class SourceVisitor extends ThrowingAstVisitor {
           space();
           token(binary.operator);
 
-          if (binary.operator.toString() == '??') {
-            soloSplit();
-          } else {
+          if (<String>['&&', '||', '+'].contains(binary.operator.toString())) {
             split();
+          } else {
+            soloSplit();
           }
           traverse(binary.right);
         }
