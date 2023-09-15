@@ -3187,10 +3187,10 @@ class SourceVisitor extends ThrowingAstVisitor {
       {bool nest = false}) {
     space();
     token(equalsOperator);
+    space();
 
     if (nest) builder.nestExpression(now: true);
 
-    soloSplit(_assignmentCost(rightHandSide));
     builder.startSpan();
     visit(rightHandSide);
     builder.endSpan();
