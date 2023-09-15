@@ -3781,8 +3781,13 @@ class SourceVisitor extends ThrowingAstVisitor {
   /// statement or element.
   void _visitIfCondition(Token ifKeyword, Token leftParenthesis,
       AstNode condition, CaseClause? caseClause, Token rightParenthesis) {
+    // The condition's parent is always an IfStatement. If the IfStatement's
+    // parent is also an IfStatement, this means the condition if for an
+    // IfStatement's "else if" clause
+    bool isElseIfCondition = condition.parent?.parent is IfStatement;
     int expectedLength = (
       builder.indentation * 2 + // Base if indentation
+      (isElseIfCondition ? 7 : 0) + // "} else "
       4 + // "if ("
       condition.toString().length +
       3 // ") {"
