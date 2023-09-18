@@ -107,7 +107,7 @@ class ChunkBuilder {
   int _preventSplitNesting = 0;
 
   /// The current number of characters of block indentation.
-  int get indentation => _nesting.indentation;
+  int get indentation => _nesting.indentation + (_parent?.indentation ?? 0);
 
   /// The number of characters of code that can fit in a single line.
   int get pageWidth => _formatter.pageWidth;

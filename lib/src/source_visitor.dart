@@ -3786,7 +3786,7 @@ class SourceVisitor extends ThrowingAstVisitor {
     // IfStatement's "else if" clause
     bool isElseIfCondition = condition.parent?.parent is IfStatement;
     int expectedLength = (
-      builder.indentation * 2 + // Base if indentation
+      builder.indentation + // Base if indentation
       (isElseIfCondition ? 7 : 0) + // "} else "
       4 + // "if ("
       condition.toString().length +
