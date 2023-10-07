@@ -1,144 +1,172 @@
-The dart_style package defines an automatic, opinionated formatter for Dart
-code. It replaces the whitespace in your program with what it deems to be the
-best formatting for it. Resulting code should follow the [Dart style guide][]
-but, moreso, should look nice to most human readers, most of the time.
+The dart_style package defines an automatic, opinionated formatter for Dart code. It replaces the whitespace in your program with what it deems to be the best formatting for it. Resulting code should follow the [Dart style guide][] but, moreso, should look nice to most human readers, most of the time.
 
 [dart style guide]: https://dart.dev/guides/language/effective-dart/style
 
-The formatter handles indentation, inline whitespace, and (by far the most
-difficult) intelligent line wrapping. It has no problems with nested
-collections, function expressions, long argument lists, or otherwise tricky
-code.
+The formatter handles indentation, inline whitespace, and (by far the most difficult) intelligent line wrapping. It has no problems with nested collections, function expressions, long argument lists, or otherwise tricky code.
 
-The formatter turns code like this:
+The formatter will never break your code&mdash;you can safely invoke it automatically from build and presubmit scripts.
 
-```dart
-// BEFORE formatting
-if (tag=='style'||tag=='script'&&(type==null||type == TYPE_JS
-      ||type==TYPE_DART)||
-  tag=='link'&&(rel=='stylesheet'||rel=='import')) {}
-```
-
-into:
-
-```dart
-// AFTER formatting
-if (tag == 'style' ||
-  tag == 'script' &&
-      (type == null || type == TYPE_JS || type == TYPE_DART) ||
-  tag == 'link' && (rel == 'stylesheet' || rel == 'import')) {}
-```
-
-The formatter will never break your code&mdash;you can safely invoke it
-automatically from build and presubmit scripts.
-
-## Style fixes
-
-The formatter can also apply non-whitespace changes to make your code
-consistently idiomatic. You must opt into these by passing either `--fix` which
-applies all style fixes, or any of the `--fix-`-prefixed flags to apply specific
-fixes.
-
-For example, running with `--fix-named-default-separator` changes this:
-
-```dart
-greet(String name, {String title: "Captain"}) {
-  print("Greetings, $title $name!");
-}
-```
-
-into:
-
-```dart
-greet(String name, {String title = "Captain"}) {
-  print("Greetings, $title $name!");
-}
-```
+**This is a fork of the original dart_style, created from differing opinions on how code should be formatted. You can find a (non-exhaustive) list of changes below.**
 
 ## Using the formatter
 
-The formatter is part of the unified [`dart`][] developer tool included in the
-Dart SDK, so most users get it directly from there. That has the latest version
-of the formatter that was available when the SDK was released.
+Because this is a fork, it will not work with the default invocation `dart format` - that one is reserved for the community one - WHICH YOU SHOULD USE if you're developing a package that will be maintained along with the community, instead of for personal / company use.
 
-[`dart`]: https://dart.dev/tools/dart-tool
+After cloning this repository, you can use it as a formatter by activating it with `dart pub`:
 
-IDEs and editors that support Dart usually provide easy ways to run the
-formatter. For example, in WebStorm you can right-click a .dart file and then
-choose **Reformat with Dart Style**.
+    $ cd dart_style/
+    $ dart pub global activate --source path .
 
-Here's a simple example of using the formatter on the command line:
+You can now invoke this formatter with `dartformat` or `dartfmt`, after you include the default installation directory in your `PATH`:
 
-    $ dart format test.dart
+    $ export PATH="$PATH":"$HOME/.pub-cache/bin"
+    $ cd my_project/
+    $ dartformat -w .
 
-This command formats the `test.dart` file and writes the result to the
-file.
+Consider adding the `dartformat` command to your editor's pre-save script so you can benefit from automatic formatting when saving your code!
 
-`dart format` takes a list of paths, which can point to directories or files. If
-the path is a directory, it processes every `.dart` file in that directory or
-any of its subdirectories.
+## Example changes
 
-By default, it formats each file and write the formatting changes to the files.
-If you pass `--output show`, it prints the formatted code to stdout.
+#### Indentation size shenanigans
 
-You may pass a `-l` option to control the width of the page that it wraps lines
-to fit within, but you're strongly encouraged to keep the default line length of
-80 columns.
-
-### Validating files
-
-If you want to use the formatter in something like a [presubmit script][] or
-[commit hook][], you can pass flags to omit writing formatting changes to disk
-and to update the exit code to indicate success/failure:
-
-    $ dart format --output=none --set-exit-if-changed .
-
-[presubmit script]: https://www.chromium.org/developers/how-tos/depottools/presubmit-scripts
-[commit hook]: https://git-scm.com/book/en/v2/Customizing-Git-Git-Hooks
-
-## Running other versions of the formatter CLI command
-
-If you need to run a different version of the formatter, you can
-[globally activate][] the package from the dart_style package on
-pub.dev:
-
-[globally activate]: https://dart.dev/tools/pub/cmd/pub-global
-
-    $ pub global activate dart_style
-    $ pub global run dart_style:format ...
-
-## Using the dart_style API
-
-The package also exposes a single dart_style library containing a programmatic
-API for formatting code. Simple usage looks like this:
+When a function body statement contains a constructor call that won't fit in max column width, keep the indentation with 2 spaces instead of adding a block of 4 spaces (adding up to 6 spaces):
 
 ```dart
-import 'package:dart_style/dart_style.dart';
+String get someMember => SomeConstructor(
+  argument1: value1,
+  argument2: value2,
+  argument3: value3,
+);
+```
+vs
+```dart
+String get someMember => SomeConstructor(
+      argument1: value1,
+      argument2: value2,
+      argument3: value3,
+    );
+```
 
-main() {
-  final formatter = DartFormatter();
+When a ternary statement cannot fit in max column width, indent it with 2 spaces instead of 4:
 
-  try {
-    print(formatter.format("""
-    library an_entire_compilation_unit;
+```dart
+String veryLongValue = someCondition
+  ? 'veeeeryLongValueA'
+  : 'veeeeryLongValueB';
+```
+vs
+```dart
+String veryLongValue = someCondition
+    ? 'veeeeryLongValueA'
+    : 'veeeeryLongValueB';
+```
 
-    class SomeClass {}
-    """));
+#### If condition indentation
 
-    print(formatter.formatStatement("aSingle(statement);"));
-  } on FormatterException catch (ex) {
-    print(ex);
-  }
+When an if statement's conditions cannot all fit in max column width, spread each condition on a separate new line instead of piggybacking off of the line containing the `if(` and the `) {` tokens.
+
+```dart
+if (
+  someCondition1 &&
+  someCondition2 &&
+  someCondition3 &&
+  someCondition4 &&
+  someCondition5
+) {
+  // do something
+}
+```
+vs
+```dart
+if (someCondition1 &&
+    someCondition2 &&
+    someCondition3 &&
+    someCondition4 &&
+    someCondition5) {
+  // do something
 }
 ```
 
-## Other resources
+#### Switch-case curly braces consistency
 
-* Before sending an email, see if you are asking a
-  [frequently asked question][faq].
+A switch-case statement's case curly braces behavior should be consistent with the rest of the syntax: start the scope on the same line, and end on a new line:
 
-* Before filing a bug, or if you want to understand how work on the
-  formatter is managed, see how we [track issues][].
+```dart
+switch (argument1) {
+  case 'A': {
+    // do something
+  }
+  break;
+  case 'B': {
+    // do something else
+  }
+  break;
+}
+```
+vs
+```dart
+switch (argument1) {
+  case 'A':
+    {
+      // do something
+    }
+    break;
+  case 'B':
+    {
+      // do something else
+    }
+    break;
+}
+```
 
-[faq]: https://github.com/dart-lang/dart_style/wiki/FAQ
-[track issues]: https://github.com/dart-lang/dart_style/wiki/Tracking-issues
+#### Super constructors indentation
+
+When a super constructor's invocation is not preceded by member assignments, AND the invocation doesn't fit in max column width, keep the indentation with 2 spaces instead of adding a block of 4 spaces (adding up to 6 spaces):
+
+```dart
+SomeClass({
+  required this.argument1,
+}) : super(
+  otherArgument1: 'value1',
+  otherArgument2: 'value2',
+);
+```
+vs
+```dart
+SomeClass({
+  required this.argument1,
+}) : super(
+      otherArgument1: 'value1',
+      otherArgument2: 'value2',
+    );
+```
+
+#### Method cascading indentation
+
+When a statement contains a cascade of method invocations, avoid putting each method call in a separate line, as it only works best when the methods are short and simple. Instead, the programmer can choose when to force an indentation by providing a comma to the list of arguments for a method:
+
+```dart
+String finalValue = someObject.someMember.method1('someValue').method2(
+  (String argument) => aSlightlyComplexStatementThatNeedsBreak(argument),
+).method3('yetAnotherValue');
+
+String finalValue2 = someObject.someMember.method1('someValue').method4(
+  'anotherValue',
+).method3('yetAnotherValue');
+```
+vs
+```dart
+String finalValue = someObject.someMember
+    .method1('someValue')
+    .method2(
+      (String argument) => aSlightlyComplexStatementThatNeedsBreak(argument),
+    )
+    .method3('yetAnotherValue');
+
+String finalValue2 = someObject.someMember
+    .method1('someValue')
+    .method2('anotherValue')
+    .method3('yetAnotherValue');
+```
+
+Long cascades are bad anyway, don't use them. :)
