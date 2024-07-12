@@ -1,6 +1,35 @@
-## 2.3.3-dev
+## 2.3.7-wip
 
+* Remove temporary work around for analyzer 6.2.0 from dart_style 2.3.6.
+* Require `package:analyzer` `>=6.5.0 <7.0.0`.
+
+## 2.3.6
+
+* Fix compile error when using dart_style with analyzer 6.2.0.
+
+## 2.3.5
+
+* Ensure switch expressions containing line comments split (#1404).
+* Use language version `3.3` to parse so that code with extension types can be
+  formatted.
+* Support formatting the `macro` modifier when the `macros` experiment flag
+  is passed.
+
+## 2.3.4
+
+* Add `tall-style` experiment flag to enable the in-progress unstable new
+  formatting style (#1253).
+* Format extension types.
+* Normalize ignored whitespace and "escaped whitespace" on first line
+  of multiline string literals (#1235).
+
+## 2.3.3
+
+* Always split enum declarations containing a line comment (#1254).
+* Fix regression in splitting type annotations with library prefixes (#1249).
 * Remove support for `inline class` since that syntax has changed.
+* Add `--enable-experiment` command-line option to enable language experiments.
+  The library API also supports this with `DartFormatter.experimentFlags`.
 
 ## 2.3.2
 

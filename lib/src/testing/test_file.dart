@@ -1,3 +1,6 @@
+// Copyright (c) 2024, the Dart project authors.  Please see the AUTHORS file
+// for details. All rights reserved. Use of this source code is governed by a
+// BSD-style license that can be found in the LICENSE file.
 import 'dart:io';
 import 'dart:isolate';
 
@@ -10,12 +13,23 @@ final _fixPattern = RegExp(r'\(fix ([a-x-]+)\)');
 final _unicodeUnescapePattern = RegExp(r'×([0-9a-fA-F]{2,4})');
 final _unicodeEscapePattern = RegExp('[\x0a\x0c\x0d]');
 
+/// Get the absolute local file path to the dart_style package's root directory.
+Future<String> findPackageDirectory() async {
+  var libraryPath = (await Isolate.resolvePackageUri(
+          Uri.parse('package:dart_style/src/testing/test_file.dart')))
+      ?.toFilePath();
+
+  // Fallback, if we can't resolve the package URI because we're running in an
+  // AOT snapshot, just assume we're running from the root directory of the
+  // package.
+  libraryPath ??= 'lib/src/testing/test_file.dart';
+
+  return p.normalize(p.join(p.dirname(libraryPath), '../../..'));
+}
+
 /// Get the absolute local file path to the package's "test" directory.
 Future<String> findTestDirectory() async {
-  var libraryUri = await Isolate.resolvePackageUri(
-      Uri.parse('package:dart_style/src/testing/test_file.dart'));
-  return p
-      .normalize(p.join(p.dirname(libraryUri!.toFilePath()), '../../../test'));
+  return p.normalize(p.join(await findPackageDirectory(), 'test'));
 }
 
 /// A file containing a series of formatting tests.
@@ -58,9 +72,23 @@ class TestFile {
 
     var tests = <FormatTest>[];
 
+    List<String> readComments() {
+      var comments = <String>[];
+      while (lines[i].startsWith('###')) {
+        comments.add(lines[i]);
+        i++;
+      }
+
+      return comments;
+    }
+
+    String readLine() => lines[i++];
+
+    var fileComments = readComments();
+
     while (i < lines.length) {
-      var line = i + 1;
-      var description = lines[i++].replaceAll('>>>', '');
+      var lineNumber = i + 1;
+      var description = readLine().replaceAll('>>>', '');
       var fixes = <StyleFix>[];
 
       // Let the test specify a leading indentation. This is handy for
@@ -77,16 +105,29 @@ class TestFile {
         return '';
       });
 
+      var inputComments = readComments();
+
       var inputBuffer = StringBuffer();
-      while (!lines[i].startsWith('<<<')) {
-        inputBuffer.writeln(lines[i++]);
+      while (i < lines.length) {
+        var line = readLine();
+        if (line.startsWith('<<<')) break;
+        inputBuffer.writeln(line);
       }
 
-      var outputDescription = lines[i].replaceAll('<<<', '');
+      var outputDescription = lines[i - 1].replaceAll('<<<', '');
+
+      var outputComments = readComments();
 
       var outputBuffer = StringBuffer();
-      while (++i < lines.length && !lines[i].startsWith('>>>')) {
-        outputBuffer.writeln(lines[i]);
+      while (i < lines.length) {
+        var line = readLine();
+        if (line.startsWith('>>>')) {
+          // Found another test, so roll back to the test description for the
+          // next iteration through the loop.
+          i--;
+          break;
+        }
+        outputBuffer.writeln(line);
       }
 
       var isCompilationUnit = file.path.endsWith('.unit');
@@ -95,14 +136,22 @@ class TestFile {
       var output = _extractSelection(_unescapeUnicode(outputBuffer.toString()),
           isCompilationUnit: isCompilationUnit);
 
-      tests.add(FormatTest(input, output, description.trim(),
-          outputDescription.trim(), line, fixes, leadingIndent));
+      tests.add(FormatTest(
+          input,
+          output,
+          description.trim(),
+          outputDescription.trim(),
+          lineNumber,
+          fixes,
+          leadingIndent,
+          inputComments,
+          outputComments));
     }
 
-    return TestFile._(relativePath, pageWidth, tests);
+    return TestFile._(relativePath, pageWidth, fileComments, tests);
   }
 
-  TestFile._(this.path, this.pageWidth, this.tests);
+  TestFile._(this.path, this.pageWidth, this.comments, this.tests);
 
   /// The path to the test file, relative to the `test/` directory.
   final String path;
@@ -110,6 +159,10 @@ class TestFile {
   /// The page width for tests in this file or `null` if the default should be
   /// used.
   final int? pageWidth;
+
+  /// The `###` comment lines at the beginning of the test file before any
+  /// tests.
+  final List<String> comments;
 
   /// The tests in this file.
   final List<FormatTest> tests;
@@ -128,8 +181,15 @@ class FormatTest {
   /// The optional description of the test.
   final String description;
 
+  /// The `###` comment lines appearing after the test description before the
+  /// input code.
+  final List<String> inputComments;
+
   /// If there is a remark on the "<<<" line, this is it.
   final String outputDescription;
+
+  /// The `###` comment lines appearing after the "<<<" before the output code.
+  final List<String> outputComments;
 
   /// The 1-based index of the line where this test begins.
   final int line;
@@ -141,13 +201,32 @@ class FormatTest {
   /// line.
   final int leadingIndent;
 
-  FormatTest(this.input, this.output, this.description, this.outputDescription,
-      this.line, this.fixes, this.leadingIndent);
+  FormatTest(
+      this.input,
+      this.output,
+      this.description,
+      this.outputDescription,
+      this.line,
+      this.fixes,
+      this.leadingIndent,
+      this.inputComments,
+      this.outputComments);
 
   /// The line and description of the test.
   String get label {
     if (description.isEmpty) return 'line $line';
     return 'line $line: $description';
+  }
+}
+
+extension SourceCodeExtensions on SourceCode {
+  /// If the source code has a selection, returns its text with `‹` and `›`
+  /// inserted at the selection begin and end points.
+  ///
+  /// Otherwise, returns the code as-is.
+  String get textWithSelectionMarkers {
+    if (selectionStart == null) return text;
+    return '$textBeforeSelection‹$selectedText›$textAfterSelection';
   }
 }
 

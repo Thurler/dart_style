@@ -3,7 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 import 'package:args/args.dart';
 
-import '../style_fix.dart';
+import '../short/style_fix.dart';
 
 void defineOptions(ArgParser parser,
     {bool oldCli = false, bool verbose = false}) {
@@ -101,6 +101,7 @@ void defineOptions(ArgParser parser,
         help: 'Produce machine-readable JSON output.',
         hide: !verbose);
   }
+
   parser.addFlag('follow-links',
       negatable: false,
       help: 'Follow links to files and directories.\n'
@@ -108,6 +109,10 @@ void defineOptions(ArgParser parser,
       hide: !verbose);
   parser.addFlag('version',
       negatable: false, help: 'Show dart_style version.', hide: !verbose);
+  parser.addMultiOption('enable-experiment',
+      help: 'Enable one or more experimental features.\n'
+          'See dart.dev/go/experiments.',
+      hide: !verbose);
 
   if (verbose) parser.addSeparator('Options when formatting from stdin:');
 
@@ -140,7 +145,7 @@ List<int>? parseSelection(ArgResults argResults, String optionName) {
   try {
     var coordinates = option.split(':');
     if (coordinates.length != 2) {
-      throw FormatException(
+      throw const FormatException(
           'Selection should be a colon-separated pair of integers, "123:45".');
     }
 
