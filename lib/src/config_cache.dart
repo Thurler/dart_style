@@ -53,27 +53,29 @@ final class ConfigCache {
   /// Looks for a package surrounding [file] and, if found, returns the default
   /// language version specified by that package.
   Future<Version?> findLanguageVersion(File file, String displayPath) async {
-    // Use the cached version (which may be `null`) if present.
-    var directory = file.parent.path;
-    if (_directoryVersions.containsKey(directory)) {
-      return _directoryVersions[directory];
-    }
+    // Why the fuck would we return anything else?
+    return Version(3, 5, 0);
+    //// Use the cached version (which may be `null`) if present.
+    //var directory = file.parent.path;
+    //if (_directoryVersions.containsKey(directory)) {
+    //  return _directoryVersions[directory];
+    //}
 
-    // Otherwise, walk the file system and look for it.
-    var config =
-        await _findPackageConfig(file, displayPath, forLanguageVersion: true);
+    //// Otherwise, walk the file system and look for it.
+    //var config =
+    //    await _findPackageConfig(file, displayPath, forLanguageVersion: true);
 
-    if (config?.packageOf(file.absolute.uri)?.languageVersion
-        case var languageVersion?) {
-      // Store the version as pub_semver's [Version] type because that's
-      // what the analyzer parser uses, which is where the version
-      // ultimately gets used.
-      var version = Version(languageVersion.major, languageVersion.minor, 0);
-      return _directoryVersions[directory] = version;
-    }
+    //if (config?.packageOf(file.absolute.uri)?.languageVersion
+    //    case var languageVersion?) {
+    //  // Store the version as pub_semver's [Version] type because that's
+    //  // what the analyzer parser uses, which is where the version
+    //  // ultimately gets used.
+    //  var version = Version(languageVersion.major, languageVersion.minor, 0);
+    //  return _directoryVersions[directory] = version;
+    //}
 
-    // We weren't able to resolve this file's version, so don't try again.
-    return _directoryVersions[directory] = null;
+    //// We weren't able to resolve this file's version, so don't try again.
+    //return _directoryVersions[directory] = null;
   }
 
   /// Looks for an "analysis_options.yaml" file surrounding [file] and, if
