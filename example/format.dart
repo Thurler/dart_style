@@ -3,7 +3,6 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import 'package:dart_style/dart_style.dart';
-import 'package:dart_style/src/constants.dart';
 import 'package:dart_style/src/debug.dart' as debug;
 import 'package:dart_style/src/testing/test_file.dart';
 
@@ -16,6 +15,9 @@ void main(List<String> args) {
   debug.useAnsiColors = true;
   debug.tracePieceBuilder = true;
   debug.traceSolver = true;
+  debug.traceSolverEnqueing = true;
+  debug.traceSolverDequeing = true;
+  debug.traceSolverShowCode = true;
 
   _formatStmt('''
   1 + 2;
@@ -25,7 +27,7 @@ void main(List<String> args) {
   class C {}
   ''');
 
-  _runTest('selection/selection.stmt', 2);
+  _runTest('other/selection.stmt', 2);
 }
 
 void _formatStmt(String source, {bool tall = true, int pageWidth = 40}) {
@@ -40,8 +42,10 @@ void _runFormatter(String source, int pageWidth,
     {required bool tall, required bool isCompilationUnit}) {
   try {
     var formatter = DartFormatter(
-        pageWidth: pageWidth,
-        experimentFlags: [if (tall) tallStyleExperimentFlag]);
+        languageVersion: tall
+            ? DartFormatter.latestLanguageVersion
+            : DartFormatter.latestShortStyleLanguageVersion,
+        pageWidth: pageWidth);
 
     String result;
     if (isCompilationUnit) {
@@ -68,16 +72,13 @@ void _drawRuler(String label, int width) {
 /// directory.
 Future<void> _runTest(String path, int line,
     {int pageWidth = 40, bool tall = true}) async {
-  var testFile = await TestFile.read(path);
+  var testFile = await TestFile.read('${tall ? 'tall' : 'short'}/$path');
   var formatTest = testFile.tests.firstWhere((test) => test.line == line);
 
   var formatter = DartFormatter(
+      languageVersion: formatTest.languageVersion,
       pageWidth: testFile.pageWidth,
-      indent: formatTest.leadingIndent,
-      fixes: formatTest.fixes,
-      experimentFlags: tall
-          ? const ['inline-class', tallStyleExperimentFlag]
-          : const ['inline-class']);
+      indent: formatTest.leadingIndent);
 
   var actual = formatter.formatSource(formatTest.input);
 

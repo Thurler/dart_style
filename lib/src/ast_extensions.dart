@@ -7,6 +7,16 @@ import 'package:analyzer/dart/ast/token.dart';
 import 'piece/list.dart';
 
 extension AstNodeExtensions on AstNode {
+  /// When this node is in an argument list, what kind of block formatting
+  /// category it belongs to.
+  BlockFormat get blockFormatType => switch (this) {
+        AdjacentStrings(indentStrings: true) =>
+          BlockFormat.indentedAdjacentStrings,
+        AdjacentStrings() => BlockFormat.unindentedAdjacentStrings,
+        Expression(:var blockFormatType) => blockFormatType,
+        _ => BlockFormat.none,
+      };
+
   /// The first token at the beginning of this AST node, not including any
   /// tokens for leading doc comments.
   ///
@@ -16,8 +26,23 @@ extension AstNodeExtensions on AstNode {
   /// (if there is any), or the beginning of the code.
   Token get firstNonCommentToken {
     return switch (this) {
+      // If the node is annotated, skip past the doc comments, but not the
+      // metadata.
       AnnotatedNode(metadata: [var annotation, ...]) => annotation.beginToken,
       AnnotatedNode(firstTokenAfterCommentAndMetadata: var token) => token,
+
+      // The inner [NormalFormalParameter] is an [AnnotatedNode].
+      DefaultFormalParameter(:var parameter) => parameter.firstNonCommentToken,
+
+      // The inner [PatternVariableDeclaration] is an [AnnotatedNode].
+      PatternVariableDeclarationStatement(:var declaration) =>
+        declaration.firstNonCommentToken,
+
+      // The inner [VariableDeclarationList] is an [AnnotatedNode].
+      VariableDeclarationStatement(:var variables) =>
+        variables.firstNonCommentToken,
+
+      // Otherwise, we don't have to worry about doc comments.
       _ => beginToken
     };
   }
@@ -217,6 +242,9 @@ extension ExpressionExtensions on Expression {
 
       // Parenthesized expressions unwrap the inner expression.
       ParenthesizedExpression(:var expression) => expression.blockFormatType,
+
+      // Await expressions unwrap the inner expression.
+      AwaitExpression(:var expression) => expression.blockFormatType,
       _ => BlockFormat.none,
     };
   }

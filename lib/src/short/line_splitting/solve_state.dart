@@ -22,7 +22,7 @@ import 'rule_set.dart';
 /// From a given solve state, we can explore the search tree to more refined
 /// solve states by producing new ones that add more bound rules to the current
 /// state.
-class SolveState {
+final class SolveState {
   final LineSplitter _splitter;
   final RuleSet _ruleValues;
 
@@ -525,7 +525,7 @@ class SolveState {
     var unboundConstraints = <Rule, Set<int>>{};
     for (var unbound in _unboundRules) {
       // Lazily create and add the set to the constraints only if needed.
-      late final disallowedValues = unboundConstraints[unbound] = {};
+      late var disallowedValues = unboundConstraints[unbound] = {};
 
       for (var bound in unbound.constrainedRules) {
         if (!_boundRules.contains(bound)) continue;

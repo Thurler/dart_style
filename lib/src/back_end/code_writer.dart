@@ -5,6 +5,7 @@ import 'dart:math';
 
 import '../piece/piece.dart';
 import '../profile.dart';
+import 'code.dart';
 import 'solution.dart';
 import 'solution_cache.dart';
 
@@ -19,7 +20,7 @@ import 'solution_cache.dart';
 /// an instance of this class. It has methods that the piece can call to add
 /// output text to the resulting code, recursively format child pieces, insert
 /// whitespace, etc.
-class CodeWriter {
+final class CodeWriter {
   final int _pageWidth;
 
   /// Previously cached formatted subtrees.
@@ -28,8 +29,8 @@ class CodeWriter {
   /// The solution this [CodeWriter] is generating code for.
   final Solution _solution;
 
-  /// Buffer for the code being written.
-  final StringBuffer _buffer = StringBuffer();
+  /// The code being written.
+  final GroupCode _code;
 
   /// What whitespace should be written before the next non-whitespace text.
   ///
@@ -40,7 +41,7 @@ class CodeWriter {
   ///
   /// Initially [Whitespace.newline] so that we write the leading indentation
   /// before the first token.
-  Whitespace _pendingWhitespace = Whitespace.newline;
+  Whitespace _pendingWhitespace = Whitespace.none;
 
   /// The number of spaces of indentation that should be begin the next line
   /// when [_pendingWhitespace] is [Whitespace.newline] or
@@ -99,19 +100,21 @@ class CodeWriter {
   /// [leadingIndent] is the number of spaces of leading indentation at the
   /// beginning of each line independent of indentation created by pieces being
   /// written.
-  CodeWriter(this._pageWidth, int leadingIndent, this._cache, this._solution) {
+  CodeWriter(this._pageWidth, int leadingIndent, this._cache, this._solution)
+      : _code = GroupCode(leadingIndent) {
     _indentStack.add(_Indent(leadingIndent, 0));
 
-    // Write the leading indent before the first line.
+    // Track the leading indent before the first line.
     _pendingIndent = leadingIndent;
+    _column = _pendingIndent;
   }
 
-  /// Returns the final formatted text and the next pieces that can be expanded
+  /// Returns the final formatted code and the next pieces that can be expanded
   /// from the solution this [CodeWriter] is writing, if any.
-  (String, List<Piece>) finish() {
+  (GroupCode, List<Piece>) finish() {
     _finishLine();
 
-    return (_buffer.toString(), _expandPieces);
+    return (_code, _expandPieces);
   }
 
   /// Appends [text] to the output.
@@ -124,7 +127,7 @@ class CodeWriter {
   /// selections inside lexemes are correctly updated.
   void write(String text) {
     _flushWhitespace();
-    _buffer.write(text);
+    _code.write(text);
     _column += text.length;
 
     // If we haven't found an overflowing line yet, then this line might be one
@@ -253,20 +256,7 @@ class CodeWriter {
     _flushWhitespace();
 
     _solution.mergeSubtree(solution);
-
-    // If a selection marker was in the child piece, set it in this piece,
-    // relative to where the child's code is appended.
-    if (solution.selectionStart case var start?) {
-      _solution.startSelection(_buffer.length + start);
-    }
-
-    if (solution.selectionEnd case var end?) {
-      _solution.endSelection(_buffer.length + end);
-    }
-
-    Profile.begin('CodeWriter.format() write separate piece text');
-    _buffer.write(solution.text);
-    Profile.end('CodeWriter.format() write separate piece text');
+    _code.group(solution.code);
   }
 
   /// Format [piece] writing directly into this [CodeWriter].
@@ -334,13 +324,18 @@ class CodeWriter {
   /// Sets [selectionStart] to be [start] code units into the output.
   void startSelection(int start) {
     _flushWhitespace();
-    _solution.startSelection(_buffer.length + start);
+    _code.startSelection(start);
   }
 
   /// Sets [selectionEnd] to be [end] code units into the output.
   void endSelection(int end) {
     _flushWhitespace();
-    _solution.endSelection(_buffer.length + end);
+    _code.endSelection(end);
+  }
+
+  /// Disables or re-enables formatting in a region of code.
+  void setFormattingEnabled(bool enabled, int sourceOffset) {
+    _code.setFormattingEnabled(enabled, sourceOffset);
   }
 
   /// Write any pending whitespace.
@@ -355,18 +350,13 @@ class CodeWriter {
 
       case Whitespace.newline:
       case Whitespace.blankLine:
-        // Don't write any leading newlines at the top of the buffer.
-        if (_buffer.isNotEmpty) {
-          _finishLine();
-          _buffer.writeln();
-          if (_pendingWhitespace == Whitespace.blankLine) _buffer.writeln();
-        }
-
+        _finishLine();
         _column = _pendingIndent;
-        _buffer.write(' ' * _column);
+        _code.newline(
+            blank: _pendingWhitespace == Whitespace.blankLine, indent: _column);
 
       case Whitespace.space:
-        _buffer.write(' ');
+        _code.write(' ');
         _column++;
     }
 
@@ -382,12 +372,13 @@ class CodeWriter {
     // If we found a problematic line, and there is are pieces on the line that
     // we can try to split, then remember them so that the solution will expand
     // them next.
-    if (!_foundExpandLine && (_column > _pageWidth || !_solution.isValid)) {
-      // We found a problematic line, so remember the pieces on it.
-      _foundExpandLine = true;
+    if (_foundExpandLine) return;
+    if (_currentLinePieces.isNotEmpty &&
+        (_column > _pageWidth || !_solution.isValid)) {
       _expandPieces.addAll(_currentLinePieces);
-    } else if (!_foundExpandLine) {
-      // This line was OK, so we don't need to expand the piece on it.
+      _foundExpandLine = true;
+    } else {
+      // This line was OK, so we don't need to expand the pieces on it.
       _currentLinePieces.clear();
     }
   }
@@ -425,7 +416,7 @@ enum Whitespace {
 }
 
 /// A level of indentation in the indentation stack.
-class _Indent {
+final class _Indent {
   /// The total number of spaces of indentation.
   final int indent;
 

@@ -59,18 +59,6 @@ sealed class TextPiece extends Piece {
     }
   }
 
-  /// Sets [selectionStart] to be [start] code units after the end of the
-  /// current text in this piece.
-  void startSelection(int start) {
-    _selectionStart = _adjustSelection(start);
-  }
-
-  /// Sets [selectionEnd] to be [end] code units after the end of the
-  /// current text in this piece.
-  void endSelection(int end) {
-    _selectionEnd = _adjustSelection(end);
-  }
-
   /// Adjust [offset] by the current length of this [TextPiece].
   int _adjustSelection(int offset) {
     for (var line in _lines) {
@@ -117,7 +105,7 @@ sealed class TextPiece extends Piece {
 
 /// [TextPiece] for non-comment source code that may have comments attached to
 /// it.
-class CodePiece extends TextPiece {
+final class CodePiece extends TextPiece {
   /// Pieces for any comments that appear immediately before this code.
   final List<Piece> _leadingComments;
 
@@ -159,11 +147,11 @@ class CodePiece extends TextPiece {
 }
 
 /// A [TextPiece] for a source code comment and the whitespace after it, if any.
-class CommentPiece extends TextPiece {
+final class CommentPiece extends TextPiece {
   /// Whitespace at the end of the comment.
   final Whitespace _trailingWhitespace;
 
-  CommentPiece([this._trailingWhitespace = Whitespace.none]);
+  CommentPiece(this._trailingWhitespace);
 
   @override
   void format(CodeWriter writer, State state) {
@@ -180,8 +168,34 @@ class CommentPiece extends TextPiece {
   void forEachChild(void Function(Piece piece) callback) {}
 }
 
+/// A piece for the special `// dart format off` and `// dart format on`
+/// comments that are used to opt a region of code out of being formatted.
+final class EnableFormattingCommentPiece extends CommentPiece {
+  /// Whether this comment disables formatting (`format off`) or re-enables it
+  /// (`format on`).
+  final bool _enabled;
+
+  /// The number of code points from the beginning of the unformatted source
+  /// where the unformatted code should begin or end.
+  ///
+  /// If this piece is for `// dart format off`, then the offset is just past
+  /// the `off`. If this piece is for `// dart format on`, it points to just
+  /// before `//`.
+  final int _sourceOffset;
+
+  EnableFormattingCommentPiece(this._sourceOffset, super._trailingWhitespace,
+      {required bool enable})
+      : _enabled = enable;
+
+  @override
+  void format(CodeWriter writer, State state) {
+    super.format(writer, state);
+    writer.setFormattingEnabled(_enabled, _sourceOffset);
+  }
+}
+
 /// A piece that writes a single space.
-class SpacePiece extends Piece {
+final class SpacePiece extends Piece {
   @override
   void forEachChild(void Function(Piece piece) callback) {}
 
@@ -198,7 +212,7 @@ class SpacePiece extends Piece {
 }
 
 /// A piece that writes a single newline.
-class NewlinePiece extends Piece {
+final class NewlinePiece extends Piece {
   @override
   void forEachChild(void Function(Piece piece) callback) {}
 

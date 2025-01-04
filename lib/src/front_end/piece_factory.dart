@@ -123,7 +123,7 @@ mixin PieceFactory {
         leftBracket: leftBracket,
         elements,
         rightBracket: rightBracket,
-        style: const ListStyle(allowBlockElement: true));
+        allowBlockArgument: true);
   }
 
   /// Writes a bracket-delimited block or declaration body.
@@ -420,16 +420,32 @@ mixin PieceFactory {
         // The update clauses.
         if (forParts.updaters.isNotEmpty) {
           partsList.addCommentsBefore(forParts.updaters.first.beginToken);
-          partsList.add(createCommaSeparated(forParts.updaters));
+
+          // Create a nested list builder for the updaters so that they can
+          // remain unsplit even while the clauses split.
+          var updaterBuilder = DelimitedListBuilder(
+              this, const ListStyle(commas: Commas.nonTrailing));
+          forParts.updaters.forEach(updaterBuilder.visit);
+
+          // Add the updater builder to the clause builder so that any comments
+          // around a trailing comma after the updaters don't get dropped.
+          partsList.addInnerBuilder(updaterBuilder);
         }
 
         partsList.rightBracket(rightParenthesis);
         forPartsPiece = partsList.build();
 
       case ForEachParts forEachParts &&
-            ForEachPartsWithDeclaration(loopVariable: AstNode variable):
+            ForEachPartsWithDeclaration(:var loopVariable):
+        forPartsPiece = pieces.build(() {
+          pieces.token(leftParenthesis);
+          _writeDeclaredForIn(
+              loopVariable, forEachParts.inKeyword, forEachParts.iterable);
+          pieces.token(rightParenthesis);
+        });
+
       case ForEachParts forEachParts &&
-            ForEachPartsWithIdentifier(identifier: AstNode variable):
+            ForEachPartsWithIdentifier(:var identifier):
         // If a for-in loop, treat the for parts like an assignment, so they
         // split like:
         //
@@ -438,7 +454,7 @@ mixin PieceFactory {
         //     ]) {
         //       body;
         //     }
-        // TODO(tall): Passing `canBlockSplitLeft: true` allows output like:
+        // TODO(rnystrom): Passing `canBlockSplitLeft: true` allows output like:
         //
         //     // 1
         //     for (variable in longExpression +
@@ -471,7 +487,8 @@ mixin PieceFactory {
         // statement or element.
         forPartsPiece = pieces.build(() {
           pieces.token(leftParenthesis);
-          writeForIn(variable, forEachParts.inKeyword, forEachParts.iterable);
+          _writeForIn(
+              identifier, forEachParts.inKeyword, forEachParts.iterable);
           pieces.token(rightParenthesis);
         });
 
@@ -480,14 +497,20 @@ mixin PieceFactory {
         forPartsPiece = pieces.build(() {
           pieces.token(leftParenthesis);
 
-          // Use a nested piece so that the metadata precedes the keyword and
-          // not the `(`.
-          pieces.withMetadata(metadata, inlineMetadata: true, () {
-            pieces.token(keyword);
-            pieces.space();
-
-            writeForIn(pattern, forEachParts.inKeyword, forEachParts.iterable);
+          // Hoist any leading comments so they don't force the for-in clauses
+          // to split.
+          pieces.hoistLeadingComments(
+              metadata.firstOrNull?.beginToken ?? keyword, () {
+            // Use a nested piece so that the metadata precedes the keyword and
+            // not the `(`.
+            return pieces.build(metadata: metadata, inlineMetadata: true, () {
+              pieces.token(keyword);
+              pieces.space();
+              _writeForIn(
+                  pattern, forEachParts.inKeyword, forEachParts.iterable);
+            });
           });
+
           pieces.token(rightParenthesis);
         });
     }
@@ -606,19 +629,33 @@ mixin PieceFactory {
       return;
     }
 
-    var returnTypePiece = pieces.build(() {
-      for (var keyword in modifiers) {
-        pieces.modifier(keyword);
-      }
+    // Hoist any comments before the function so they don't force a split
+    // between the return type and function. In most cases, this doesn't matter
+    // because the [SequenceBuilder] for the surrounding code will separate out
+    // the leading comment. But if there is a metadata annotation followed by
+    // a comment, then the function, then the comment doesn't get captured by
+    // the [SequenceBuilder], as in:
+    //
+    //     @meta
+    //     // Weird place for comment.
+    //     int f() {}
+    var firstToken =
+        modifiers.nonNulls.firstOrNull ?? returnType.firstNonCommentToken;
+    pieces.hoistLeadingComments(firstToken, () {
+      var returnTypePiece = pieces.build(() {
+        for (var keyword in modifiers) {
+          pieces.modifier(keyword);
+        }
 
-      pieces.visit(returnType);
+        pieces.visit(returnType);
+      });
+
+      var signature = pieces.build(() {
+        writeFunction();
+      });
+
+      return VariablePiece(returnTypePiece, [signature], hasType: true);
     });
-
-    var signature = pieces.build(() {
-      writeFunction();
-    });
-
-    pieces.add(VariablePiece(returnTypePiece, [signature], hasType: true));
   }
 
   /// If [parameter] has a [defaultValue] then writes a piece for the parameter
@@ -765,7 +802,8 @@ mixin PieceFactory {
         pieces.token(catchKeyword);
         pieces.space();
 
-        var parameters = DelimitedListBuilder(this);
+        var parameters = DelimitedListBuilder(
+            this, const ListStyle(commas: Commas.nonTrailing));
         parameters.leftBracket(catchClause.leftParenthesis!);
         if (catchClause.exceptionParameter case var exceptionParameter?) {
           parameters.visit(exceptionParameter);
@@ -805,55 +843,66 @@ mixin PieceFactory {
   void writeImport(NamespaceDirective directive, Token keyword,
       {Token? deferredKeyword, Token? asKeyword, SimpleIdentifier? prefix}) {
     pieces.withMetadata(directive.metadata, () {
-      if (directive.configurations.isEmpty && asKeyword == null) {
-        // If there are no configurations or prefix (the common case), just
-        // write the import directly inline.
+      // Build a piece for the directive itself.
+      var directivePiece = pieces.build(() {
         pieces.token(keyword);
         pieces.space();
         pieces.visit(directive.uri);
-      } else {
-        // Otherwise, allow splitting between the configurations and prefix.
-        var sections = [
-          pieces.build(() {
-            pieces.token(keyword);
-            pieces.space();
-            pieces.visit(directive.uri);
-          })
-        ];
+      });
 
+      // Add all of the clauses and combinators.
+      var clauses = <Piece>[];
+
+      // The language specifies that configurations must appear after any `as`
+      // clause but the parser incorrectly accepts them before it and code in
+      // the wild relies on that. Instead of failing with an "unexpected output"
+      // error, just preserve the order of the clauses if they are out of order.
+      // See: https://github.com/dart-lang/sdk/issues/56641
+      var wroteConfigurations = false;
+      if (directive.configurations.isNotEmpty &&
+          asKeyword != null &&
+          directive.configurations.first.ifKeyword.offset < asKeyword.offset) {
         for (var configuration in directive.configurations) {
-          sections.add(nodePiece(configuration));
+          clauses.add(nodePiece(configuration));
         }
 
-        if (asKeyword != null) {
-          sections.add(pieces.build(() {
-            pieces.token(deferredKeyword, spaceAfter: true);
-            pieces.token(asKeyword);
-            pieces.space();
-            pieces.visit(prefix!);
-          }));
-        }
-
-        pieces.add(InfixPiece(const [], sections));
+        wroteConfigurations = true;
       }
 
-      if (directive.combinators.isNotEmpty) {
-        var combinators = <Piece>[];
-        for (var combinatorNode in directive.combinators) {
-          switch (combinatorNode) {
-            case HideCombinator(hiddenNames: var names):
-            case ShowCombinator(shownNames: var names):
-              combinators.add(InfixPiece(const [], [
-                tokenPiece(combinatorNode.keyword),
-                for (var name in names)
-                  tokenPiece(name.token, commaAfter: true),
-              ]));
-            default:
-              throw StateError('Unknown combinator type $combinatorNode.');
-          }
-        }
+      // Include the `as` clause.
+      if (asKeyword != null) {
+        clauses.add(pieces.build(() {
+          pieces.token(deferredKeyword, spaceAfter: true);
+          pieces.token(asKeyword);
+          pieces.space();
+          pieces.visit(prefix!);
+        }));
+      }
 
-        pieces.add(ClausePiece(combinators));
+      // Include any `if` clauses.
+      if (!wroteConfigurations) {
+        for (var configuration in directive.configurations) {
+          clauses.add(nodePiece(configuration));
+        }
+      }
+
+      // Include the `show` and `hide` clauses.
+      for (var combinatorNode in directive.combinators) {
+        switch (combinatorNode) {
+          case HideCombinator(hiddenNames: var names):
+          case ShowCombinator(shownNames: var names):
+            clauses.add(InfixPiece([
+              tokenPiece(combinatorNode.keyword),
+              for (var name in names) tokenPiece(name.token, commaAfter: true),
+            ]));
+        }
+      }
+
+      // If there are clauses, include them.
+      if (clauses.isNotEmpty) {
+        pieces.add(ClausePiece(directivePiece, clauses));
+      } else {
+        pieces.add(directivePiece);
       }
 
       pieces.token(directive.semicolon);
@@ -862,7 +911,7 @@ mixin PieceFactory {
 
   /// Writes a [Piece] for an index expression.
   void writeIndexExpression(IndexExpression index) {
-    // TODO(tall): Consider whether we should allow splitting between
+    // TODO(rnystrom): Consider whether we should allow splitting between
     // successive index expressions, like:
     //
     //     jsonData['some long key']
@@ -887,10 +936,6 @@ mixin PieceFactory {
   /// separate tokens, as in `foo is! Bar`.
   void writeInfix(AstNode left, Token operator, AstNode right,
       {bool hanging = false, Token? operator2}) {
-    // Hoist any comments before the first operand so they don't force the
-    // infix operator to split.
-    var leadingComments = pieces.takeCommentsBefore(left.firstNonCommentToken);
-
     var leftPiece = pieces.build(() {
       pieces.visit(left);
       if (hanging) {
@@ -910,7 +955,7 @@ mixin PieceFactory {
       pieces.visit(right);
     });
 
-    pieces.add(InfixPiece(leadingComments, [leftPiece, rightPiece]));
+    pieces.add(InfixPiece([leftPiece, rightPiece]));
   }
 
   /// Writes a chained infix operation: a binary operator expression, or
@@ -931,10 +976,6 @@ mixin PieceFactory {
   void writeInfixChain<T extends AstNode>(
       T node, BinaryOperation Function(T node) destructure,
       {int? precedence, bool indent = true}) {
-    // Hoist any comments before the first operand so they don't force the
-    // infix operator to split.
-    var leadingComments = pieces.takeCommentsBefore(node.firstNonCommentToken);
-
     var operands = <Piece>[];
 
     void traverse(AstNode e) {
@@ -962,7 +1003,7 @@ mixin PieceFactory {
       traverse(node);
     }));
 
-    pieces.add(InfixPiece(leadingComments, operands, indent: indent));
+    pieces.add(InfixPiece(operands, indent: indent));
   }
 
   /// Writes a [ListPiece] for the given bracket-delimited set of elements.
@@ -981,7 +1022,8 @@ mixin PieceFactory {
       {required Token leftBracket,
       required Token rightBracket,
       ListStyle style = const ListStyle(),
-      bool preserveNewlines = false}) {
+      bool preserveNewlines = false,
+      bool allowBlockArgument = false}) {
     // If the list is completely empty, write the brackets directly inline so
     // that we create fewer pieces.
     if (!elements.canSplit(rightBracket)) {
@@ -997,7 +1039,7 @@ mixin PieceFactory {
     if (preserveNewlines && elements.containsLineComments(rightBracket)) {
       _preserveNewlinesInCollection(elements, builder);
     } else {
-      elements.forEach(builder.visit);
+      builder.visitAll(elements, allowBlockArgument: allowBlockArgument);
     }
 
     builder.rightBracket(rightBracket);
@@ -1043,7 +1085,7 @@ mixin PieceFactory {
               elements[i - 1].endToken, element.beginToken)) {
         // This element begins a new line. Add the elements on the previous
         // line to the list builder and start a new line.
-        builder.add(lineBuilder.build());
+        builder.addInnerBuilder(lineBuilder);
         lineBuilder = DelimitedListBuilder(this, lineStyle);
         atLineStart = true;
       }
@@ -1058,7 +1100,8 @@ mixin PieceFactory {
       atLineStart = false;
     }
 
-    if (!atLineStart) builder.add(lineBuilder.build());
+    // Finish the last line if there is anything on it.
+    if (!atLineStart) builder.addInnerBuilder(lineBuilder);
   }
 
   /// Writes a [VariablePiece] for a named or wildcard variable pattern.
@@ -1213,7 +1256,7 @@ mixin PieceFactory {
       var clauses = <Piece>[];
 
       void typeClause(Token keyword, List<AstNode> types) {
-        clauses.add(InfixPiece(const [], [
+        clauses.add(InfixPiece([
           tokenPiece(keyword),
           for (var type in types) nodePiece(type, commaAfter: true),
         ]));
@@ -1245,16 +1288,12 @@ mixin PieceFactory {
             [if (nativeClause.name case var name?) name]);
       }
 
-      ClausePiece? clausesPiece;
       if (clauses.isNotEmpty) {
-        clausesPiece = ClausePiece(clauses,
+        header = ClausePiece(header, clauses,
             allowLeadingClause: extendsClause != null || onClause != null);
       }
 
-      var bodyPiece = body();
-
-      pieces
-          .add(TypePiece(header, clausesPiece, bodyPiece, bodyType: bodyType));
+      pieces.add(TypePiece(header, body(), bodyType: bodyType));
     });
   }
 
@@ -1313,6 +1352,26 @@ mixin PieceFactory {
     //      element,
     //    ];
     canBlockSplitLeft |= switch (leftHandSide) {
+      // Treat method chains and cascades on the LHS as if they were blocks.
+      // They don't really fit the "block" term, but it looks much better to
+      // force a method chain to split on the left than to try to avoid
+      // splitting it and split at the assignment instead:
+      //
+      //    // Worse:
+      //    target.method(
+      //          argument,
+      //        ).setter =
+      //        value;
+      //
+      //    // Better:
+      //    target.method(argument)
+      //        .setter = value;
+      //
+      MethodInvocation() => true,
+      PropertyAccess() => true,
+      PrefixedIdentifier() => true,
+
+      // Otherwise, it must be an actual block construct.
       Expression() => leftHandSide.canBlockSplit,
       DartPattern() => leftHandSide.canBlockSplit,
       _ => false
@@ -1342,21 +1401,59 @@ mixin PieceFactory {
         canBlockSplitRight: canBlockSplitRight));
   }
 
-  /// Writes a [Piece] for the `<variable> in <expression>` part of a for-in
-  /// loop.
-  void writeForIn(AstNode leftHandSide, Token inKeyword, Expression sequence) {
-    var leftPiece =
-        nodePiece(leftHandSide, context: NodeContext.forLoopVariable);
+  /// Writes the `<variable> in <expression>` part of an identifier or pattern
+  /// for-in loop.
+  void _writeForIn(AstNode leftHandSide, Token inKeyword, Expression sequence) {
+    // Hoist any leading comments so they don't force the for-in clauses to
+    // split.
+    pieces.hoistLeadingComments(leftHandSide.firstNonCommentToken, () {
+      var leftPiece =
+          nodePiece(leftHandSide, context: NodeContext.forLoopVariable);
+      var sequencePiece = _createForInSequence(inKeyword, sequence);
 
-    var sequencePiece = pieces.build(() {
+      return ForInPiece(leftPiece, sequencePiece,
+          canBlockSplitSequence: sequence.canBlockSplit);
+    });
+  }
+
+  /// Writes the `<variable> in <expression>` part of a for-in loop when the
+  /// part before `in` is a variable declaration.
+  ///
+  /// A for-in loop with a variable declaration can have metadata before it,
+  /// which requires some special handling so that we don't push the metadata
+  /// and any comments after it into the left child piece of [ForInPiece].
+  void _writeDeclaredForIn(
+      DeclaredIdentifier identifier, Token inKeyword, Expression sequence) {
+    // Hoist any leading comments so they don't force the for-in clauses
+    // to split.
+    pieces.hoistLeadingComments(identifier.beginToken, () {
+      // Use a nested piece so that the metadata precedes the keyword and
+      // not the `(`.
+      return pieces.build(metadata: identifier.metadata, inlineMetadata: true,
+          () {
+        var leftPiece = pieces.build(() {
+          writeParameter(
+              modifiers: [identifier.keyword],
+              identifier.type,
+              identifier.name);
+        });
+
+        var sequencePiece = _createForInSequence(inKeyword, sequence);
+
+        pieces.add(ForInPiece(leftPiece, sequencePiece,
+            canBlockSplitSequence: sequence.canBlockSplit));
+      });
+    });
+  }
+
+  /// Creates a piece for the `in <sequence>` part of a for-in loop.
+  Piece _createForInSequence(Token inKeyword, Expression sequence) {
+    return pieces.build(() {
       // Put the `in` at the beginning of the sequence.
       pieces.token(inKeyword);
       pieces.space();
       pieces.visit(sequence);
     });
-
-    pieces.add(ForInPiece(leftPiece, sequencePiece,
-        canBlockSplitSequence: sequence.canBlockSplit));
   }
 
   /// Writes a piece for a parameter-like constructor: Either a simple formal

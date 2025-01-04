@@ -2,18 +2,9 @@
 // for details. All rights reserved. Use of this source code is governed by a
 // BSD-style license that can be found in the LICENSE file.
 
-/// The in-progress "tall" formatting style is enabled by passing an experiment
-/// flag with this name.
-///
-/// Note that this isn't a real Dart SDK experiment: Only the formatter supports
-/// it. We use the [experimentFlags] API to pass this in so that support for it
-/// can be removed in a later version without it being a breaking change to the
-/// dart_style library API.
-const tallStyleExperimentFlag = 'tall-style';
-
 /// Constants for the cost heuristics used to determine which set of splits is
 /// most desirable.
-class Cost {
+final class Cost {
   /// The cost of splitting after the `=>` in a lambda or arrow-bodied member.
   ///
   /// We make this zero because there is already a span around the entire body
@@ -64,7 +55,7 @@ class Cost {
 }
 
 /// Constants for the number of spaces for various kinds of indentation.
-class Indent {
+final class Indent {
   /// Reset back to no indentation.
   static const none = 0;
 

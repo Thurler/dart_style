@@ -8,6 +8,7 @@ import 'package:analyzer/dart/ast/token.dart';
 import '../ast_extensions.dart';
 import '../constants.dart';
 import '../piece/chain.dart';
+import '../piece/leading_comment.dart';
 import '../piece/list.dart';
 import '../piece/piece.dart';
 import 'piece_factory.dart';
@@ -41,7 +42,7 @@ import 'piece_factory.dart';
 ///
 /// This lets us create a single [ChainPiece] for the entire series of dotted
 /// operations, so that we can control splitting them or not as a unit.
-class ChainBuilder {
+final class ChainBuilder {
   final PieceFactory _visitor;
 
   /// The outermost expression being converted to a chain.
@@ -78,11 +79,34 @@ class ChainBuilder {
         var piece = _visitor.nodePiece(section);
 
         var callType = switch (section) {
+          // Force the cascade to split if there are leading comments before
+          // the cascade section to avoid:
+          //
+          //     target// comment
+          //     ..method(
+          //       argument,
+          //     );
+          _ when piece is LeadingCommentPiece => CallType.unsplittableCall,
+
+          // If the section is itself a method chain, then force the cascade to
+          // split if the method does, as in:
+          //
+          //     cascadeTarget
+          //       ..methodTarget.method(
+          //         argument,
+          //       );
+          MethodInvocation(target: _?) => CallType.unsplittableCall,
+
+          // Otherwise, allow a direct method call in the cascade to not split
+          // the cascade if the arguments can split, as in:
+          //
+          //     cascadeTarget..method(
+          //       argument,
+          //     );
           MethodInvocation(argumentList: var args)
               when args.arguments.canSplit(args.rightParenthesis) =>
             CallType.splittableCall,
-          MethodInvocation() => CallType.unsplittableCall,
-          _ => CallType.property,
+          _ => CallType.unsplittableCall,
         };
 
         _calls.add(ChainCall(piece, callType));
@@ -293,8 +317,13 @@ class ChainBuilder {
           });
         });
 
-      case IndexExpression():
-        _unwrapPostfix(expression.target!, (target) {
+      case IndexExpression(:var target?):
+        // We check for a non-null target because the target may be `null` if
+        // the chain we are building is itself in a cascade section that begins
+        // with an index expression like:
+        //
+        //     object..[index].chain();
+        _unwrapPostfix(target, (target) {
           return _visitor.pieces.build(() {
             _visitor.pieces.add(target);
             _visitor.writeIndexExpression(expression);

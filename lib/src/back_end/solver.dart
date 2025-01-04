@@ -42,7 +42,7 @@ const _maxAttempts = 10000;
 ///     use it across different Solutions. This enables us to both divide and
 ///     conquer the Piece tree and solve portions separately, while also
 ///     reusing work across different solutions.
-class Solver {
+final class Solver {
   final SolutionCache _cache;
 
   final int _pageWidth;
@@ -90,6 +90,14 @@ class Solver {
     _queue.add(solution);
     Profile.end('Solver enqueue');
 
+    if (debug.traceSolverEnqueing) {
+      debug.log(debug.bold('Enqueue initial $solution'));
+      if (debug.traceSolverShowCode) {
+        debug.log(solution.code.toDebugString());
+        debug.log('');
+      }
+    }
+
     // The lowest cost solution found so far that does overflow.
     var best = solution;
 
@@ -101,10 +109,12 @@ class Solver {
 
       attempts++;
 
-      if (debug.traceSolver) {
+      if (debug.traceSolverDequeing) {
         debug.log(debug.bold('Try #$attempts $solution'));
-        debug.log(solution.text);
-        debug.log('');
+        if (debug.traceSolverShowCode) {
+          debug.log(solution.code.toDebugString());
+          debug.log('');
+        }
       }
 
       if (solution.isValid) {
@@ -127,14 +137,22 @@ class Solver {
           pageWidth: _pageWidth, leadingIndent: _leadingIndent)) {
         Profile.count('Solver enqueue');
         _queue.add(expanded);
+
+        if (debug.traceSolverEnqueing) {
+          debug.log(debug.bold('Enqueue $expanded'));
+          if (debug.traceSolverShowCode) {
+            debug.log(expanded.code.toDebugString());
+            debug.log('');
+          }
+        }
       }
     }
 
     // If we didn't find a solution without overflow, pick the least bad one.
     if (debug.traceSolver) {
       debug.unindent();
-      debug.log(debug.bold('Solved $root to $best:'));
-      debug.log(best.text);
+      debug.log(debug.bold('Solved $root to $best'));
+      debug.log(best.code.toDebugString());
       debug.log('');
     }
 

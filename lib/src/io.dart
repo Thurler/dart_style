@@ -8,13 +8,14 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import 'cli/formatter_options.dart';
+import 'config_cache.dart';
 import 'dart_formatter.dart';
 import 'exceptions.dart';
 import 'source_code.dart';
 
 /// Reads and formats input from stdin until closed.
 Future<void> formatStdin(
-    FormatterOptions options, List<int>? selection, String name) async {
+    FormatterOptions options, List<int>? selection, String? path) async {
   var selectionStart = 0;
   var selectionLength = 0;
 
@@ -23,18 +24,43 @@ Future<void> formatStdin(
     selectionLength = selection[1];
   }
 
+  var cache = ConfigCache();
+
+  var languageVersion = options.languageVersion;
+  if (languageVersion == null && path != null) {
+    // We have a stdin-name, so look for a surrounding package config.
+    languageVersion = await cache.findLanguageVersion(File(path), path);
+  }
+
+  // If they didn't specify a version or a path, or couldn't find a package
+  // surrounding the path, then default to the latest version.
+  languageVersion ??= DartFormatter.latestLanguageVersion;
+
+  // Determine the page width.
+  var pageWidth = options.pageWidth;
+  if (pageWidth == null && path != null) {
+    // We have a stdin-name, so look for a surrounding analyisis_options.yaml.
+    pageWidth = await cache.findPageWidth(File(path));
+  }
+
+  // Use a default page width if we don't have a specified one and couldn't
+  // find a configured one.
+  pageWidth ??= DartFormatter.defaultPageWidth;
+
+  var name = path ?? 'stdin';
+
   var completer = Completer<void>();
   var input = StringBuffer();
   stdin.transform(const Utf8Decoder()).listen(input.write, onDone: () {
     var formatter = DartFormatter(
+        languageVersion: languageVersion!,
         indent: options.indent,
-        pageWidth: options.pageWidth,
-        fixes: options.fixes,
+        pageWidth: pageWidth,
         experimentFlags: options.experimentFlags);
     try {
       options.beforeFile(null, name);
       var source = SourceCode(input.toString(),
-          uri: name,
+          uri: path,
           selectionStart: selectionStart,
           selectionLength: selectionLength);
       var output = formatter.formatSource(source);
@@ -58,11 +84,15 @@ $stack''');
 }
 
 /// Formats all of the files and directories given by [paths].
-void formatPaths(FormatterOptions options, List<String> paths) {
+Future<void> formatPaths(FormatterOptions options, List<String> paths) async {
+  // If the user didn't specify a language version, then look for surrounding
+  // package configs so we know what language versions to use for the files.
+  var cache = ConfigCache();
+
   for (var path in paths) {
     var directory = Directory(path);
     if (directory.existsSync()) {
-      if (!processDirectory(options, directory)) {
+      if (!await _processDirectory(cache, options, directory)) {
         exitCode = 65;
       }
       continue;
@@ -70,7 +100,7 @@ void formatPaths(FormatterOptions options, List<String> paths) {
 
     var file = File(path);
     if (file.existsSync()) {
-      if (!processFile(options, file)) {
+      if (!await _processFile(cache, options, file)) {
         exitCode = 65;
       }
     } else {
@@ -84,47 +114,27 @@ void formatPaths(FormatterOptions options, List<String> paths) {
 ///
 /// Returns `true` if successful or `false` if an error occurred in any of the
 /// files.
-bool processDirectory(FormatterOptions options, Directory directory) {
-  options.showDirectory(directory.path);
-
+Future<bool> _processDirectory(
+    ConfigCache cache, FormatterOptions options, Directory directory) async {
   var success = true;
-  var shownHiddenPaths = <String>{};
 
   var entries =
       directory.listSync(recursive: true, followLinks: options.followLinks);
   entries.sort((a, b) => a.path.compareTo(b.path));
 
   for (var entry in entries) {
-    var displayPath = options.show.displayPath(directory.path, entry.path);
-
-    if (entry is Link) {
-      options.showSkippedLink(displayPath);
-      continue;
-    }
+    if (entry is Link) continue;
 
     if (entry is! File || !entry.path.endsWith('.dart')) continue;
 
     // If the path is in a subdirectory starting with ".", ignore it.
     var parts = p.split(p.relative(entry.path, from: directory.path));
-    int? hiddenIndex;
-    for (var i = 0; i < parts.length; i++) {
-      if (parts[i].startsWith('.')) {
-        hiddenIndex = i;
-        break;
-      }
-    }
+    if (parts.any((part) => part.startsWith('.'))) continue;
 
-    if (hiddenIndex != null) {
-      // Since we'll hide everything inside the directory starting with ".",
-      // show the directory name once instead of once for each file.
-      var hiddenPath = p.joinAll(parts.take(hiddenIndex + 1));
-      if (shownHiddenPaths.add(hiddenPath)) {
-        options.showHiddenPath(hiddenPath);
-      }
-      continue;
+    if (!await _processFile(cache, options, entry,
+        displayPath: p.normalize(entry.path))) {
+      success = false;
     }
-
-    if (!processFile(options, entry, displayPath: displayPath)) success = false;
   }
 
   return success;
@@ -133,14 +143,32 @@ bool processDirectory(FormatterOptions options, Directory directory) {
 /// Runs the formatter on [file].
 ///
 /// Returns `true` if successful or `false` if an error occurred.
-bool processFile(FormatterOptions options, File file, {String? displayPath}) {
+Future<bool> _processFile(
+    ConfigCache cache, FormatterOptions options, File file,
+    {String? displayPath}) async {
   displayPath ??= file.path;
 
+  // Determine what language version to use.
+  var languageVersion = options.languageVersion ??
+      await cache.findLanguageVersion(file, displayPath);
+
+  // If they didn't specify a version and we couldn't find a surrounding
+  // package, then default to the latest version.
+  languageVersion ??= DartFormatter.latestLanguageVersion;
+
+  // Determine the page width.
+  var pageWidth = options.pageWidth ?? await cache.findPageWidth(file);
+
+  // Use a default page width if we don't have a specified one and couldn't
+  // find a configured one.
+  pageWidth ??= DartFormatter.defaultPageWidth;
+
   var formatter = DartFormatter(
+      languageVersion: languageVersion,
       indent: options.indent,
-      pageWidth: options.pageWidth,
-      fixes: options.fixes,
+      pageWidth: pageWidth,
       experimentFlags: options.experimentFlags);
+
   try {
     var source = SourceCode(file.readAsStringSync(), uri: file.path);
     options.beforeFile(file, displayPath);

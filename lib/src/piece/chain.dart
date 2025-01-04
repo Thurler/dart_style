@@ -49,29 +49,9 @@ import 'piece.dart';
 ///           argument,
 ///           argument,
 ///         );
-class ChainPiece extends Piece {
+final class ChainPiece extends Piece {
   /// Allow newlines in the last (or next-to-last) call but nowhere else.
   static const State _blockFormatTrailingCall = State(1, cost: 0);
-
-  // TODO(tall): Currently, we only allow a single call in the chain to be
-  // block-formatted, and it must be the last or next-to-last. That covers
-  // the majority of common use cases (>90% of Flutter call chains), but there
-  // are some cases (<1%) where it might be good to support multiple block
-  // calls in a chain, like:
-  //
-  //     future.then((_) {
-  //       doStuff();
-  //     }).then((_) {
-  //       moreStuff();
-  //     }).catchError((error) {
-  //       print('Oh no!');
-  //     });
-  //
-  // Decide if we want to support this and, if so, which calls are allowed to
-  // be block formatted. A reasonable approach would be to say that multiple
-  // block calls are allowed when the chain is (possibly zero) leading
-  // properties followed by only splittable calls and all splittable calls get
-  // block formatted.
 
   /// Split the call chain at each method call, but leave the leading properties
   /// on the same line as the target.
@@ -188,7 +168,7 @@ class ChainPiece extends Piece {
         writer.format(_target);
 
         for (var i = 0; i < _calls.length; i++) {
-          _formatCall(writer, state, i, allowNewlines: false);
+          writer.format(_calls[i]._call);
         }
 
       case _splitAfterProperties:
@@ -197,7 +177,10 @@ class ChainPiece extends Piece {
 
         for (var i = 0; i < _calls.length; i++) {
           writer.splitIf(i >= _leadingProperties, space: false);
-          _formatCall(writer, state, i, allowNewlines: i >= _leadingProperties);
+
+          // Every non-property call except the last will be on its own line.
+          writer.format(_calls[i]._call,
+              separate: i >= _leadingProperties && i < _calls.length - 1);
         }
 
         writer.popIndent();
@@ -206,7 +189,7 @@ class ChainPiece extends Piece {
         writer.format(_target);
 
         for (var i = 0; i < _calls.length; i++) {
-          _formatCall(writer, state, i, allowNewlines: i == _blockCallIndex);
+          writer.format(_calls[i]._call);
         }
 
       case State.split:
@@ -215,25 +198,14 @@ class ChainPiece extends Piece {
 
         for (var i = 0; i < _calls.length; i++) {
           writer.newline();
-          _formatCall(writer, state, i);
+
+          // The chain is fully split so every call except for the last is on
+          // its own line.
+          writer.format(_calls[i]._call, separate: i < _calls.length - 1);
         }
 
         writer.popIndent();
     }
-  }
-
-  void _formatCall(CodeWriter writer, State state, int i,
-      {bool allowNewlines = true}) {
-    // If the chain is fully split, then every call except for the last will
-    // be on its own line. If the chain is split after properties, then
-    // every non-property call except the last will be on its own line.
-    var separate = switch (state) {
-      _splitAfterProperties => i >= _leadingProperties && i < _calls.length - 1,
-      State.split => i < _calls.length - 1,
-      _ => false,
-    };
-
-    writer.format(_calls[i]._call, separate: separate);
   }
 
   @override
@@ -248,7 +220,7 @@ class ChainPiece extends Piece {
 
 /// A method or getter call in a call chain, along with any postfix operations
 /// applies to it.
-class ChainCall {
+final class ChainCall {
   /// Piece for the call.
   Piece _call;
 

@@ -14,9 +14,11 @@ import '../piece/case.dart';
 import '../piece/constructor.dart';
 import '../piece/control_flow.dart';
 import '../piece/infix.dart';
+import '../piece/leading_comment.dart';
 import '../piece/list.dart';
 import '../piece/piece.dart';
 import '../piece/type.dart';
+import '../piece/type_parameter_bound.dart';
 import '../piece/variable.dart';
 import '../profile.dart';
 import '../source_code.dart';
@@ -34,7 +36,7 @@ import 'sequence_builder.dart';
 /// To avoid this class becoming a monolith, functionality is divided into a
 /// couple of mixins, one for each area of functionality. This class then
 /// contains only shared state and the visitor methods for the AST.
-class AstNodeVisitor extends ThrowingAstVisitor<void> with PieceFactory {
+final class AstNodeVisitor extends ThrowingAstVisitor<void> with PieceFactory {
   @override
   final PieceWriter pieces;
 
@@ -66,7 +68,10 @@ class AstNodeVisitor extends ThrowingAstVisitor<void> with PieceFactory {
   ///
   /// This is the only method that should be called externally. Everything else
   /// is effectively private.
-  SourceCode run(AstNode node) {
+  ///
+  /// If there is a `// dart format width=123` comment before the formatted
+  /// code, then [pageWidthFromComment] is that width.
+  SourceCode run(SourceCode source, AstNode node, [int? pageWidthFromComment]) {
     Profile.begin('AstNodeVisitor.run()');
 
     Profile.begin('AstNodeVisitor build Piece tree');
@@ -123,7 +128,7 @@ class AstNodeVisitor extends ThrowingAstVisitor<void> with PieceFactory {
     Profile.end('AstNodeVisitor build Piece tree');
 
     // Finish writing and return the complete result.
-    var result = pieces.finish(unitPiece);
+    var result = pieces.finish(source, unitPiece, pageWidthFromComment);
 
     Profile.end('AstNodeVisitor.run()');
 
@@ -132,7 +137,7 @@ class AstNodeVisitor extends ThrowingAstVisitor<void> with PieceFactory {
 
   @override
   void visitAdjacentStrings(AdjacentStrings node) {
-    var piece = InfixPiece(const [], node.strings.map(nodePiece).toList(),
+    var piece = InfixPiece(node.strings.map(nodePiece).toList(),
         indent: node.indentStrings);
 
     // Adjacent strings always split.
@@ -325,10 +330,6 @@ class AstNodeVisitor extends ThrowingAstVisitor<void> with PieceFactory {
 
   @override
   void visitConditionalExpression(ConditionalExpression node) {
-    // Hoist any comments before the condition operand so they don't force the
-    // conditional expression to split.
-    var leadingComments = pieces.takeCommentsBefore(node.firstNonCommentToken);
-
     // Flatten a series of else-if-like chained conditionals into a single long
     // infix piece. This produces a flattened style like:
     //
@@ -366,7 +367,7 @@ class AstNodeVisitor extends ThrowingAstVisitor<void> with PieceFactory {
       }
     }
 
-    var piece = InfixPiece(leadingComments, operands);
+    var piece = InfixPiece(operands);
 
     // If conditional expressions are directly nested, force them all to split,
     // both parents and children.
@@ -386,7 +387,17 @@ class AstNodeVisitor extends ThrowingAstVisitor<void> with PieceFactory {
     pieces.token(node.leftParenthesis);
 
     if (node.equalToken case var equals?) {
-      writeInfix(node.name, equals, node.value!, hanging: true);
+      // Hoist comments so that they don't force the `==` to split.
+      pieces.hoistLeadingComments(node.name.firstNonCommentToken, () {
+        return InfixPiece([
+          pieces.build(() {
+            pieces.visit(node.name);
+            pieces.space();
+            pieces.token(equals);
+          }),
+          nodePiece(node.value!)
+        ]);
+      });
     } else {
       pieces.visit(node.name);
     }
@@ -403,43 +414,45 @@ class AstNodeVisitor extends ThrowingAstVisitor<void> with PieceFactory {
 
   @override
   void visitConstructorDeclaration(ConstructorDeclaration node) {
-    var header = pieces.build(metadata: node.metadata, () {
-      pieces.modifier(node.externalKeyword);
-      pieces.modifier(node.constKeyword);
-      pieces.modifier(node.factoryKeyword);
-      pieces.visit(node.returnType);
-      pieces.token(node.period);
-      pieces.token(node.name);
-    });
-
-    var parameters = nodePiece(node.parameters);
-
-    Piece? redirect;
-    Piece? initializerSeparator;
-    Piece? initializers;
-    if (node.redirectedConstructor case var constructor?) {
-      var separator = pieces.build(() {
-        pieces.token(node.separator);
-        pieces.space();
+    pieces.withMetadata(node.metadata, () {
+      var header = pieces.build(() {
+        pieces.modifier(node.externalKeyword);
+        pieces.modifier(node.constKeyword);
+        pieces.modifier(node.factoryKeyword);
+        pieces.visit(node.returnType);
+        pieces.token(node.period);
+        pieces.token(node.name);
       });
 
-      redirect = AssignPiece(
-          separator, nodePiece(constructor, context: NodeContext.assignment),
-          canBlockSplitRight: false);
-    } else if (node.initializers.isNotEmpty) {
-      initializerSeparator = tokenPiece(node.separator!);
-      initializers = createCommaSeparated(node.initializers);
-    }
+      var parameters = nodePiece(node.parameters);
 
-    var body = nodePiece(node.body);
+      Piece? redirect;
+      Piece? initializerSeparator;
+      Piece? initializers;
+      if (node.redirectedConstructor case var constructor?) {
+        var separator = pieces.build(() {
+          pieces.token(node.separator);
+          pieces.space();
+        });
 
-    pieces.add(ConstructorPiece(header, parameters, body,
-        canSplitParameters: node.parameters.parameters
-            .canSplit(node.parameters.rightParenthesis),
-        hasOptionalParameter: node.parameters.rightDelimiter != null,
-        redirect: redirect,
-        initializerSeparator: initializerSeparator,
-        initializers: initializers));
+        redirect = AssignPiece(
+            separator, nodePiece(constructor, context: NodeContext.assignment),
+            canBlockSplitRight: false);
+      } else if (node.initializers.isNotEmpty) {
+        initializerSeparator = tokenPiece(node.separator!);
+        initializers = createCommaSeparated(node.initializers);
+      }
+
+      var body = nodePiece(node.body);
+
+      pieces.add(ConstructorPiece(header, parameters, body,
+          canSplitParameters: node.parameters.parameters
+              .canSplit(node.parameters.rightParenthesis),
+          hasOptionalParameter: node.parameters.rightDelimiter != null,
+          redirect: redirect,
+          initializerSeparator: initializerSeparator,
+          initializers: initializers));
+    });
   }
 
   @override
@@ -605,7 +618,9 @@ class AstNodeVisitor extends ThrowingAstVisitor<void> with PieceFactory {
         nodePiece(node.expression, context: NodeContext.assignment);
 
     pieces.add(AssignPiece(operatorPiece, expression,
-        canBlockSplitRight: node.expression.canBlockSplit));
+        canBlockSplitRight: node.expression.canBlockSplit,
+        avoidBlockSplitRight:
+            node.expression.blockFormatType == BlockFormat.invocation));
     pieces.token(node.semicolon);
   }
 
@@ -757,32 +772,32 @@ class AstNodeVisitor extends ThrowingAstVisitor<void> with PieceFactory {
 
   @override
   void visitForEachPartsWithDeclaration(ForEachPartsWithDeclaration node) {
-    throw UnsupportedError('This node is handled by createFor().');
+    throw UnsupportedError('This node is handled by writeFor().');
   }
 
   @override
   void visitForEachPartsWithIdentifier(ForEachPartsWithIdentifier node) {
-    throw UnsupportedError('This node is handled by createFor().');
+    throw UnsupportedError('This node is handled by writeFor().');
   }
 
   @override
   void visitForEachPartsWithPattern(ForEachPartsWithPattern node) {
-    throw UnsupportedError('This node is handled by createFor().');
+    throw UnsupportedError('This node is handled by writeFor().');
   }
 
   @override
   void visitForPartsWithDeclarations(ForPartsWithDeclarations node) {
-    throw UnsupportedError('This node is handled by createFor().');
+    throw UnsupportedError('This node is handled by writeFor().');
   }
 
   @override
   void visitForPartsWithExpression(ForPartsWithExpression node) {
-    throw UnsupportedError('This node is handled by createFor().');
+    throw UnsupportedError('This node is handled by writeFor().');
   }
 
   @override
   void visitForPartsWithPattern(ForPartsWithPattern node) {
-    throw UnsupportedError('This node is handled by createFor().');
+    throw UnsupportedError('This node is handled by writeFor().');
   }
 
   @override
@@ -1574,7 +1589,8 @@ class AstNodeVisitor extends ThrowingAstVisitor<void> with PieceFactory {
   void visitRepresentationDeclaration(RepresentationDeclaration node) {
     pieces.visit(node.constructorName);
 
-    var builder = DelimitedListBuilder(this);
+    var builder =
+        DelimitedListBuilder(this, const ListStyle(commas: Commas.nonTrailing));
     builder.leftBracket(node.leftParenthesis);
     builder.add(pieces.build(() {
       writeParameter(
@@ -1715,7 +1731,7 @@ class AstNodeVisitor extends ThrowingAstVisitor<void> with PieceFactory {
     }
 
     list.rightBracket(node.rightBracket);
-    pieces.add(list.build());
+    pieces.add(list.build(forceSplit: node.cases.isNotEmpty));
   }
 
   @override
@@ -1763,8 +1779,7 @@ class AstNodeVisitor extends ThrowingAstVisitor<void> with PieceFactory {
             var patternPiece = nodePiece(member.guardedPattern.pattern);
 
             if (member.guardedPattern.whenClause case var whenClause?) {
-              pieces.add(
-                  InfixPiece(const [], [patternPiece, nodePiece(whenClause)]));
+              pieces.add(InfixPiece([patternPiece, nodePiece(whenClause)]));
             } else {
               pieces.add(patternPiece);
             }
@@ -1835,12 +1850,21 @@ class AstNodeVisitor extends ThrowingAstVisitor<void> with PieceFactory {
   @override
   void visitTypeParameter(TypeParameter node) {
     pieces.withMetadata(node.metadata, inlineMetadata: true, () {
-      pieces.token(node.name);
       if (node.bound case var bound?) {
-        pieces.space();
-        pieces.token(node.extendsKeyword);
-        pieces.space();
-        pieces.visit(bound);
+        var typeParameterPiece = pieces.build(() {
+          pieces.token(node.name);
+        });
+
+        var boundPiece = pieces.build(() {
+          pieces.token(node.extendsKeyword);
+          pieces.space();
+          pieces.visit(bound);
+        });
+
+        pieces.add(TypeParameterBoundPiece(typeParameterPiece, boundPiece));
+      } else {
+        // No bound.
+        pieces.token(node.name);
       }
     });
   }
@@ -1949,7 +1973,46 @@ class AstNodeVisitor extends ThrowingAstVisitor<void> with PieceFactory {
     var previousContext = _parentContext;
     _parentContext = context;
 
-    node.accept(this);
+    // If there are comments before this node, then some of them may be leading
+    // comments. If so, capture them now. We do this here so that the comments
+    // are wrapped around the outermost possible Piece for the AST node. For
+    // example:
+    //
+    //     // Comment
+    //     a.b && c || d ? e : f;
+    //
+    // Here, the node that actually owns the token before the comment is `a`,
+    // which is an identifier expression inside a property access inside an
+    // `&&` expression inside an `||` expression inside `?:` expression. If we
+    // attach the comment to the identifier expression, then the newline from
+    // the comment will force all of those surrounding pieces to split:
+    //
+    //     // Comment
+    //     a
+    //                 .b &&
+    //             c ||
+    //             d
+    //         ? e
+    //         : f;
+    //
+    // Instead, we hoist the comment out of all of those and then have comment
+    // precede them all so that they don't split.
+    var firstToken = node.firstNonCommentToken;
+    if (firstToken.precedingComments != null) {
+      var comments = pieces.takeCommentsBefore(firstToken);
+      var piece = pieces.build(() {
+        node.accept(this);
+      });
+
+      // Check again because the preceding comments may not necessarily end up
+      // as leading comments.
+      if (comments.isNotEmpty) piece = LeadingCommentPiece(comments, piece);
+
+      pieces.add(piece);
+    } else {
+      // No preceding comments, so just visit it inline.
+      node.accept(this);
+    }
 
     _parentContext = previousContext;
   }

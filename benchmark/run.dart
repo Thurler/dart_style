@@ -10,7 +10,6 @@ import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:args/args.dart';
 import 'package:dart_style/dart_style.dart';
-import 'package:dart_style/src/constants.dart';
 import 'package:dart_style/src/debug.dart' as debug;
 import 'package:dart_style/src/front_end/ast_node_visitor.dart';
 import 'package:dart_style/src/profile.dart';
@@ -18,7 +17,6 @@ import 'package:dart_style/src/short/source_visitor.dart';
 import 'package:dart_style/src/testing/benchmark.dart';
 import 'package:dart_style/src/testing/test_file.dart';
 import 'package:path/path.dart' as p;
-import 'package:pub_semver/pub_semver.dart';
 
 /// The number of trials to run before measuring results.
 const _warmUpTrials = 100;
@@ -126,14 +124,17 @@ List<double> _runTrials(String verb, Benchmark benchmark, int trials) {
   var parseResult = parseString(
       content: source.text,
       featureSet: FeatureSet.fromEnableFlags2(
-          sdkLanguageVersion: Version(3, 3, 0), flags: const []),
+          sdkLanguageVersion: DartFormatter.latestLanguageVersion,
+          flags: const []),
       path: source.uri,
       throwIfDiagnostics: false);
 
   var formatter = DartFormatter(
+      languageVersion: _isShort
+          ? DartFormatter.latestShortStyleLanguageVersion
+          : DartFormatter.latestLanguageVersion,
       pageWidth: benchmark.pageWidth,
-      lineEnding: '\n',
-      experimentFlags: [if (!_isShort) tallStyleExperimentFlag]);
+      lineEnding: '\n');
 
   var measuredTimes = <double>[];
   for (var i = 1; i <= trials; i++) {
@@ -160,7 +161,7 @@ double _runTrial(DartFormatter formatter, ParseStringResult parseResult,
       result = visitor.run(parseResult.unit).text;
     } else {
       var visitor = AstNodeVisitor(formatter, parseResult.lineInfo, source);
-      result = visitor.run(parseResult.unit).text;
+      result = visitor.run(source, parseResult.unit).text;
     }
   }
 

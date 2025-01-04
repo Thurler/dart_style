@@ -5,11 +5,12 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:path/path.dart' as p;
+import 'package:pub_semver/pub_semver.dart';
 
 import '../../dart_style.dart';
 
 final _indentPattern = RegExp(r'\(indent (\d+)\)');
-final _fixPattern = RegExp(r'\(fix ([a-x-]+)\)');
+final _versionPattern = RegExp(r'\(version (\d+)\.(\d+)\)');
 final _unicodeUnescapePattern = RegExp(r'×([0-9a-fA-F]{2,4})');
 final _unicodeEscapePattern = RegExp('[\x0a\x0c\x0d]');
 
@@ -33,7 +34,7 @@ Future<String> findTestDirectory() async {
 }
 
 /// A file containing a series of formatting tests.
-class TestFile {
+final class TestFile {
   /// Finds all test files in the given directory relative to the package's
   /// `test/` directory.
   static Future<List<TestFile>> listDirectory(String name) async {
@@ -89,7 +90,6 @@ class TestFile {
     while (i < lines.length) {
       var lineNumber = i + 1;
       var description = readLine().replaceAll('>>>', '');
-      var fixes = <StyleFix>[];
 
       // Let the test specify a leading indentation. This is handy for
       // regression tests which often come from a chunk of nested code.
@@ -99,9 +99,15 @@ class TestFile {
         return '';
       });
 
-      // Let the test specify fixes to apply.
-      description = description.replaceAllMapped(_fixPattern, (match) {
-        fixes.add(StyleFix.all.firstWhere((fix) => fix.name == match[1]));
+      // Let the test specify a language version to parse it at. If not, use
+      // a default version for the style being tested.
+      var languageVersion = p.split(file.path).contains('tall')
+          ? DartFormatter.latestLanguageVersion
+          : DartFormatter.latestShortStyleLanguageVersion;
+      description = description.replaceAllMapped(_versionPattern, (match) {
+        var major = int.parse(match[1]!);
+        var minor = int.parse(match[2]!);
+        languageVersion = Version(major, minor, 0);
         return '';
       });
 
@@ -131,9 +137,19 @@ class TestFile {
       }
 
       var isCompilationUnit = file.path.endsWith('.unit');
+
+      // The output always has a trailing newline. When formatting a statement,
+      // the formatter (correctly) doesn't output trailing newlines when
+      // formatting a statement, so remove it from the expectation to match.
+      var outputText = outputBuffer.toString();
+      if (!isCompilationUnit) {
+        assert(outputText.endsWith('\n'));
+        outputText = outputText.substring(0, outputText.length - 1);
+      }
+
       var input = _extractSelection(_unescapeUnicode(inputBuffer.toString()),
           isCompilationUnit: isCompilationUnit);
-      var output = _extractSelection(_unescapeUnicode(outputBuffer.toString()),
+      var output = _extractSelection(_unescapeUnicode(outputText),
           isCompilationUnit: isCompilationUnit);
 
       tests.add(FormatTest(
@@ -142,7 +158,7 @@ class TestFile {
           description.trim(),
           outputDescription.trim(),
           lineNumber,
-          fixes,
+          languageVersion,
           leadingIndent,
           inputComments,
           outputComments));
@@ -171,7 +187,7 @@ class TestFile {
 }
 
 /// A single formatting test inside a [TestFile].
-class FormatTest {
+final class FormatTest {
   /// The unformatted input.
   final SourceCode input;
 
@@ -194,8 +210,8 @@ class FormatTest {
   /// The 1-based index of the line where this test begins.
   final int line;
 
-  /// The style fixes this test is applying.
-  final List<StyleFix> fixes;
+  /// The language version the test code should be parsed at.
+  final Version languageVersion;
 
   /// The number of spaces of leading indentation that should be added to each
   /// line.
@@ -207,7 +223,7 @@ class FormatTest {
       this.description,
       this.outputDescription,
       this.line,
-      this.fixes,
+      this.languageVersion,
       this.leadingIndent,
       this.inputComments,
       this.outputComments);

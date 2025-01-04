@@ -3,6 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 import '../piece/piece.dart';
 import '../profile.dart';
+import 'code.dart';
 import 'code_writer.dart';
 import 'solution_cache.dart';
 
@@ -16,7 +17,7 @@ import 'solution_cache.dart';
 /// of the pieces in the tree so they can format themselves. That in turn
 /// yields a total number of overflow characters, cost, and formatted output,
 /// which are all stored here.
-class Solution implements Comparable<Solution> {
+final class Solution implements Comparable<Solution> {
   /// The states that pieces have been bound to.
   ///
   /// Note that order that keys are inserted into this map is significant. When
@@ -35,12 +36,22 @@ class Solution implements Comparable<Solution> {
   final Map<Piece, List<State>> _allowedStates;
 
   /// The amount of penalties applied based on the chosen line splits.
-  int get cost => _cost;
+  int get cost => _cost + _subtreeCost;
+
+  /// The cost of this solution based on pieces it has bound to states itself,
+  /// excluding pieces from separately formatted subtrees.
   int _cost;
 
+  /// The cost of this solution from branches of the piece tree that were
+  /// separately formatted and merged in using [mergeSubtree()].
+  ///
+  /// We track this separately so that when expanding a solution, we don't
+  /// double count the cost of separately formatted branches.
+  int _subtreeCost = 0;
+
   /// The formatted code.
-  String get text => _text;
-  late final String _text;
+  GroupCode get code => _code;
+  late final GroupCode _code;
 
   /// False if this Solution contains a newline where one is prohibited.
   ///
@@ -98,16 +109,6 @@ class Solution implements Comparable<Solution> {
   /// If this is empty, then there are no further solutions to generate from
   /// this one. It's either a dead end or a winner.
   late final List<Piece> _expandPieces;
-
-  /// The offset in [text] where the selection starts, or `null` if there is
-  /// no selection.
-  int? get selectionStart => _selectionStart;
-  int? _selectionStart;
-
-  /// The offset in [text] where the selection ends, or `null` if there is
-  /// no selection.
-  int? get selectionEnd => _selectionEnd;
-  int? _selectionEnd;
 
   /// Creates a new [Solution] with no pieces set to any state (which
   /// implicitly means they have state [State.unsplit] unless they're pinned to
@@ -173,36 +174,8 @@ class Solution implements Comparable<Solution> {
   /// This is called when a subtree of a Piece tree is solved separately and
   /// the resulting solution is being merged with this one.
   void mergeSubtree(Solution subtreeSolution) {
-    Profile.begin('Solution.mergeSubtree()');
-
     _overflow += subtreeSolution._overflow;
-
-    // Add the subtree's bound pieces to this one. Make sure to not double
-    // count costs for pieces that are already bound in this one.
-    subtreeSolution._pieceStates.forEach((piece, state) {
-      _pieceStates.putIfAbsent(piece, () {
-        _cost += piece.stateCost(state);
-        return state;
-      });
-    });
-
-    Profile.end('Solution.mergeSubtree()');
-  }
-
-  /// Sets [selectionStart] to be [start] code units into the output.
-  ///
-  /// This should only be called by [CodeWriter].
-  void startSelection(int start) {
-    assert(_selectionStart == null);
-    _selectionStart = start;
-  }
-
-  /// Sets [selectionEnd] to be [end] code units into the output.
-  ///
-  /// This should only be called by [CodeWriter].
-  void endSelection(int end) {
-    assert(_selectionEnd == null);
-    _selectionEnd = end;
+    _subtreeCost += subtreeSolution.cost;
   }
 
   /// Mark this solution as having a newline where none is permitted by [piece]
@@ -237,7 +210,7 @@ class Solution implements Comparable<Solution> {
       var expandPiece = _expandPieces[i];
       for (var state
           in _allowedStates[expandPiece] ?? expandPiece.additionalStates) {
-        var expanded = Solution._(cache, root, pageWidth, leadingIndent, cost,
+        var expanded = Solution._(cache, root, pageWidth, leadingIndent, _cost,
             {..._pieceStates}, {..._allowedStates});
 
         // Bind all preceding expand pieces to their unsplit state. Their
@@ -308,7 +281,7 @@ class Solution implements Comparable<Solution> {
     ];
 
     return [
-      '\$$cost',
+      '\$$cost ($_cost + $_subtreeCost)',
       if (overflow > 0) '($overflow over)',
       if (!isValid) '(invalid)',
       states.join(' '),
@@ -321,9 +294,9 @@ class Solution implements Comparable<Solution> {
       SolutionCache cache, Piece root, int pageWidth, int leadingIndent) {
     var writer = CodeWriter(pageWidth, leadingIndent, cache, this);
     writer.format(root);
-    var (text, expandPieces) = writer.finish();
 
-    _text = text;
+    var (code, expandPieces) = writer.finish();
+    _code = code;
     _expandPieces = expandPieces;
   }
 

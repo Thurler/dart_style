@@ -3,6 +3,7 @@
 // BSD-style license that can be found in the LICENSE file.
 
 import '../back_end/code_writer.dart';
+import '../fast_hash.dart';
 import '../profile.dart';
 
 typedef Constrain = void Function(Piece other, State constrainedState);
@@ -14,7 +15,7 @@ typedef Constrain = void Function(Piece other, State constrainedState);
 /// roughly follows the AST but includes comments and is optimized for
 /// formatting and line splitting. The final output is then determined by
 /// deciding which pieces split and how.
-abstract class Piece {
+abstract base class Piece with FastHash {
   /// The ordered list of all possible ways this piece could split.
   ///
   /// Piece subclasses should override this if they support being split in
@@ -136,8 +137,6 @@ abstract class Piece {
   ///
   /// This is usually just the state's cost, but some pieces may want to tweak
   /// the cost in certain circumstances.
-  // TODO(tall): Given that we have this API now, consider whether it makes
-  // sense to remove the cost field from State entirely.
   int stateCost(State state) => state.cost;
 
   /// Forces this piece to always use [state].
@@ -192,14 +191,14 @@ abstract class Piece {
   String get debugName => runtimeType.toString().replaceAll('Piece', '');
 
   @override
-  String toString() => '$debugName${_pinnedState ?? ''}';
+  String toString() => '$debugName$id${_pinnedState ?? ''}';
 }
 
 /// A state that a piece can be in.
 ///
 /// Each state identifies one way that a piece can be split into multiple lines.
 /// Each piece determines how its states are interpreted.
-class State implements Comparable<State> {
+final class State implements Comparable<State> {
   static const unsplit = State(0, cost: 0);
 
   /// The maximally split state a piece can be in.

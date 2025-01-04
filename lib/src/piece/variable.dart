@@ -29,7 +29,7 @@ import 'piece.dart';
 ///     VeryLongTypeName
 ///     longVariableName = initializer,
 ///     anotherVariable = anotherInitializer;
-class VariablePiece extends Piece {
+final class VariablePiece extends Piece {
   /// Split between each variable in a multiple variable declaration.
   static const State _betweenVariables = State(1);
 
@@ -83,7 +83,6 @@ class VariablePiece extends Piece {
       // Split between variables.
       if (i > 0) writer.splitIf(state != State.unsplit);
 
-      // TODO(perf): Investigate whether it's worth using `separate:` here.
       writer.format(_variables[i]);
     }
 

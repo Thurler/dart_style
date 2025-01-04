@@ -4,29 +4,34 @@
 
 import 'dart:io';
 
-import '../short/style_fix.dart';
+import 'package:pub_semver/pub_semver.dart';
+
 import '../source_code.dart';
 import 'output.dart';
 import 'show.dart';
 import 'summary.dart';
 
 // Note: The following line of code is modified by tool/grind.dart.
-const dartStyleVersion = '2.3.6';
+const dartStyleVersion = '3.0.1';
 
 /// Global options that affect how the formatter produces and uses its outputs.
-class FormatterOptions {
+final class FormatterOptions {
+  /// The language version formatted code should be parsed at or `null` if not
+  /// specified.
+  final Version? languageVersion;
+
   /// The number of spaces of indentation to prefix the output with.
   final int indent;
 
   /// The number of columns that formatted output should be constrained to fit
-  /// within.
-  final int pageWidth;
+  /// within or `null` if not specified.
+  ///
+  /// If omitted, the formatter defaults to a page width of
+  /// [DartFormatter.defaultPageWidth].
+  final int? pageWidth;
 
   /// Whether symlinks should be traversed when formatting a directory.
   final bool followLinks;
-
-  /// The style fixes to apply while formatting.
-  final List<StyleFix> fixes;
 
   /// Which affected files should be shown.
   final Show show;
@@ -45,17 +50,16 @@ class FormatterOptions {
   final List<String> experimentFlags;
 
   FormatterOptions(
-      {this.indent = 0,
-      this.pageWidth = 80,
+      {this.languageVersion,
+      this.indent = 0,
+      this.pageWidth,
       this.followLinks = false,
-      Iterable<StyleFix>? fixes,
       this.show = Show.changed,
       this.output = Output.write,
       this.summary = Summary.none,
       this.setExitIfChanged = false,
       List<String>? experimentFlags})
-      : fixes = [...?fixes],
-        experimentFlags = [...?experimentFlags];
+      : experimentFlags = [...?experimentFlags];
 
   /// Called when [file] is about to be formatted.
   ///
@@ -87,22 +91,5 @@ class FormatterOptions {
 
     // Set the exit code.
     if (setExitIfChanged && changed) exitCode = 1;
-  }
-
-  /// Describes the directory whose contents are about to be processed.
-  void showDirectory(String path) {
-    if (output != Output.json) {
-      show.directory(path);
-    }
-  }
-
-  /// Describes the symlink at [path] that wasn't followed.
-  void showSkippedLink(String path) {
-    show.skippedLink(path);
-  }
-
-  /// Describes the hidden [path] that wasn't processed.
-  void showHiddenPath(String path) {
-    show.hiddenPath(path);
   }
 }
