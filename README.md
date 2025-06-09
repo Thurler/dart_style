@@ -15,7 +15,7 @@ Because this is a fork, it will not work with the default invocation `dart forma
 After cloning this repository, you can use it as a formatter by activating it with `dart pub`:
 
     $ cd dart_style/
-    $ dart pub global activate --source path .
+    $ dart pub global activate --source git .
 
 You can now invoke this formatter with `dartformat` or `dartfmt`, after you include the default installation directory in your `PATH`:
 
